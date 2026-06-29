@@ -1,0 +1,747 @@
+#!/usr/bin/env python3
+"""
+🐄 Telegram бот для учёта расходов по коровам.
+Логика: Купил корову → каждый день записываешь расходы (еда, уход) → продал → видишь прибыль/убыток.
+"""
+
+import logging
+import sqlite3
+import os
+from datetime import datetime, date, timedelta
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler,
+    filters, ContextTypes, ConversationHandler,
+)
+
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8669109340:AAFR5sf3bfrK4F3H12kNxYbcnQDuAUPVg1U")
+DB_PATH = "cows.db"
+
+# ── Разрешённые пользователи ──────────────────────────────────────────────────
+ALLOWED_USERS = {
+    6985425925,   # Bobojon (владелец)
+    1602913132,   # Пользователь 2
+    1272594020,   # Пользователь 3
+}
+
+logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+async def check_access(update: Update) -> bool:
+    if update.effective_user.id not in ALLOWED_USERS:
+        await update.message.reply_text(
+            "⛔ У вас нет доступа к этому боту.\n"
+            "Обратитесь к владельцу: @bobojon1c"
+        )
+        return False
+    return True
+
+# ── Состояния диалогов ───────────────────────────────────────────────────────
+(
+    # Добавить корову
+    COW_NAME, COW_PRICE, COW_WEIGHT, COW_NOTE,
+    # Расход
+    EXP_COW, EXP_CATEGORY, EXP_AMOUNT, EXP_NOTE,
+    # Продажа
+    SELL_COW, SELL_PRICE, SELL_WEIGHT, SELL_NOTE,
+    # Удалить корову
+    DEL_COW,
+) = range(13)
+
+EXP_CATEGORIES = [
+    "🌾 Отруб", "🌽 Кунчора", "💧 Вода/Поилка",
+    "💊 Лекарства", "👨‍⚕️ Ветеринар", "🔧 Инвентарь",
+    "🚛 Транспорт", "💰 Другое",
+]
+
+# ── БД ───────────────────────────────────────────────────────────────────────
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.executescript("""
+        CREATE TABLE IF NOT EXISTS cows (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL,
+            name        TEXT    NOT NULL,
+            buy_price   REAL    NOT NULL,
+            buy_weight  REAL,
+            buy_date    TEXT    NOT NULL,
+            note        TEXT,
+            status      TEXT    NOT NULL DEFAULT 'active',  -- active / sold
+            sell_price  REAL,
+            sell_weight REAL,
+            sell_date   TEXT,
+            sell_note   TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS expenses (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL,
+            cow_id      INTEGER NOT NULL,
+            category    TEXT    NOT NULL,
+            amount      REAL    NOT NULL,
+            note        TEXT,
+            created_at  TEXT    NOT NULL,
+            FOREIGN KEY (cow_id) REFERENCES cows(id)
+        );
+    """)
+    conn.commit()
+    conn.close()
+
+
+def db():
+    return sqlite3.connect(DB_PATH)
+
+
+def get_active_cows(user_id=None):
+    with db() as conn:
+        return conn.execute(
+            "SELECT id, name, buy_price, buy_weight, buy_date FROM cows WHERE status='active' ORDER BY buy_date"
+        ).fetchall()
+
+
+def get_all_cows(user_id=None):
+    with db() as conn:
+        return conn.execute(
+            "SELECT id, name, buy_price, buy_date, status FROM cows ORDER BY buy_date DESC"
+        ).fetchall()
+
+
+def get_cow(cow_id):
+    with db() as conn:
+        return conn.execute("SELECT * FROM cows WHERE id=?", (cow_id,)).fetchone()
+
+
+def total_expenses(cow_id):
+    with db() as conn:
+        row = conn.execute("SELECT COALESCE(SUM(amount),0) FROM expenses WHERE cow_id=?", (cow_id,)).fetchone()
+        return row[0]
+
+
+def expenses_by_category(cow_id):
+    with db() as conn:
+        return conn.execute(
+            "SELECT category, SUM(amount) FROM expenses WHERE cow_id=? GROUP BY category ORDER BY SUM(amount) DESC",
+            (cow_id,)
+        ).fetchall()
+
+
+def today_expenses(user_id=None):
+    today = date.today().isoformat()
+    with db() as conn:
+        return conn.execute(
+            """SELECT c.name, e.category, e.amount, e.note, e.created_at
+               FROM expenses e JOIN cows c ON e.cow_id=c.id
+               WHERE date(e.created_at)=?
+               ORDER BY e.created_at DESC""",
+            (today,)
+        ).fetchall()
+
+
+def period_expenses(user_id=None, start=None, end=None):
+    with db() as conn:
+        return conn.execute(
+            """SELECT c.name, e.category, SUM(e.amount)
+               FROM expenses e JOIN cows c ON e.cow_id=c.id
+               WHERE date(e.created_at) BETWEEN ? AND ?
+               GROUP BY c.name, e.category
+               ORDER BY c.name, SUM(e.amount) DESC""",
+            (start, end)
+        ).fetchall()
+
+
+# ── Клавиатуры ───────────────────────────────────────────────────────────────
+def main_kb():
+    return ReplyKeyboardMarkup([
+        ["🐄 Добавить корову",   "💸 Записать расход"],
+        ["💰 Продать корову",    "📊 Мои коровы"],
+        ["📅 Отчёт за сегодня",  "📆 Отчёт за месяц"],
+        ["📋 Отчёт за всё время", "ℹ️ Помощь"],
+    ], resize_keyboard=True)
+
+
+def cows_kb(cows, cancel=True):
+    rows = [[f"🐄 {c[1]} (#{c[0]})"] for c in cows]
+    if cancel:
+        rows.append(["❌ Отмена"])
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+
+
+def cat_kb():
+    rows = [EXP_CATEGORIES[i:i+2] for i in range(0, len(EXP_CATEGORIES), 2)]
+    rows.append(["❌ Отмена"])
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+
+
+def yes_no_kb():
+    return ReplyKeyboardMarkup([["✅ Да", "❌ Нет/Отмена"]], resize_keyboard=True)
+
+
+# ── Утилиты ───────────────────────────────────────────────────────────────────
+def parse_cow_choice(text):
+    """Из '🐄 Бурёнка (#3)' достаём id=3"""
+    try:
+        return int(text.split("(#")[1].rstrip(")"))
+    except Exception:
+        return None
+
+
+def days_owned(buy_date_str):
+    bd = datetime.fromisoformat(buy_date_str).date()
+    return (date.today() - bd).days + 1
+
+
+def fmt_num(n):
+    return f"{n:,.0f}"
+
+
+# ── /start ────────────────────────────────────────────────────────────────────
+async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await check_access(update): return
+    await update.message.reply_text(
+        "👋 Привет! Я помогу вести учёт расходов по коровам.\n\n"
+        "🐄 Купил корову → 💸 Каждый день записывай расходы → 💰 Продал — увидишь прибыль или убыток.\n\n"
+        "Выбери действие в меню 👇",
+        reply_markup=main_kb()
+    )
+
+
+async def help_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await check_access(update): return
+    await update.message.reply_text(
+        "📖 *Помощь:*\n\n"
+        "🐄 *Добавить корову* — записать новую корову с ценой покупки\n"
+        "💸 *Записать расход* — сено, зерно, лекарства и т.д.\n"
+        "💰 *Продать корову* — записать продажу и увидеть прибыль\n"
+        "📊 *Мои коровы* — статистика по каждой корове\n"
+        "📅 *Отчёт за сегодня* — все расходы за сегодня\n"
+        "📆 *Отчёт за месяц* — расходы за текущий месяц\n\n"
+        "🌙 Каждый день в 21:00 приходит автоматический отчёт.",
+        parse_mode="Markdown",
+        reply_markup=main_kb()
+    )
+
+
+# ── Добавить корову ────────────────────────────────────────────────────────────
+async def add_cow_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await check_access(update): return ConversationHandler.END
+    await update.message.reply_text(
+        "🐄 *Добавление новой коровы*\n\nВведи имя или номер коровы:\n_(например: Бурёнка, Корова 1, Чёрная)_",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup([["❌ Отмена"]], resize_keyboard=True)
+    )
+    return COW_NAME
+
+
+async def cow_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == "❌ Отмена":
+        await update.message.reply_text("Отменено.", reply_markup=main_kb())
+        return ConversationHandler.END
+    ctx.user_data["cow_name"] = update.message.text.strip()
+    await update.message.reply_text(
+        f"✅ Имя: *{ctx.user_data['cow_name']}*\n\nВведи цену покупки (сомон):\n_(например: 3500000)_",
+        parse_mode="Markdown"
+    )
+    return COW_PRICE
+
+
+async def cow_price(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == "❌ Отмена":
+        await update.message.reply_text("Отменено.", reply_markup=main_kb())
+        return ConversationHandler.END
+    try:
+        price = float(update.message.text.replace(" ", "").replace(",", ""))
+        if price <= 0: raise ValueError
+    except ValueError:
+        await update.message.reply_text("Введи правильную цену, например: 3500000")
+        return COW_PRICE
+    ctx.user_data["cow_price"] = price
+    await update.message.reply_text(
+        "Введи вес при покупке (кг) — необязательно:",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup([["⏭ Пропустить"], ["❌ Отмена"]], resize_keyboard=True)
+    )
+    return COW_WEIGHT
+
+
+async def cow_weight(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text == "❌ Отмена":
+        await update.message.reply_text("Отменено.", reply_markup=main_kb())
+        return ConversationHandler.END
+    if text == "⏭ Пропустить":
+        ctx.user_data["cow_weight"] = 0
+    else:
+        try:
+            ctx.user_data["cow_weight"] = float(text.replace(",", "."))
+        except ValueError:
+            await update.message.reply_text("Введи правильный вес (число):")
+            return COW_WEIGHT
+    await update.message.reply_text(
+        "Добавь заметку (необязательно):",
+        reply_markup=ReplyKeyboardMarkup([["⏭ Пропустить"], ["❌ Отмена"]], resize_keyboard=True)
+    )
+    return COW_NOTE
+
+
+async def cow_note(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text == "❌ Отмена":
+        await update.message.reply_text("Отменено.", reply_markup=main_kb())
+        return ConversationHandler.END
+    note = "" if text == "⏭ Пропустить" else text
+    uid = update.effective_user.id
+    d = ctx.user_data
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO cows (user_id, name, buy_price, buy_weight, buy_date, note) VALUES (?,?,?,?,?,?)",
+            (uid, d["cow_name"], d["cow_price"], d["cow_weight"], datetime.now().isoformat(), note)
+        )
+    wt = f", {fmt_num(d['cow_weight'])} кг" if d["cow_weight"] else ""
+    await update.message.reply_text(
+        f"✅ Корова *{d['cow_name']}* добавлена!\n\n"
+        f"💰 Цена покупки: *{fmt_num(d['cow_price'])} сомон*{wt}\n"
+        f"📅 Дата: {date.today().strftime('%d.%m.%Y')}",
+        parse_mode="Markdown", reply_markup=main_kb()
+    )
+    return ConversationHandler.END
+
+
+# ── Записать расход ────────────────────────────────────────────────────────────
+async def add_exp_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await check_access(update): return ConversationHandler.END
+    uid = update.effective_user.id
+    cows = get_active_cows(uid)
+    if not cows:
+        await update.message.reply_text(
+            "❌ Нет активных коров.\nСначала нажми *🐄 Добавить корову*.",
+            parse_mode="Markdown", reply_markup=main_kb()
+        )
+        return ConversationHandler.END
+    await update.message.reply_text(
+        "💸 *Запись расхода*\n\nДля какой коровы?",
+        parse_mode="Markdown", reply_markup=cows_kb(cows)
+    )
+    return EXP_COW
+
+
+async def exp_cow(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == "❌ Отмена":
+        await update.message.reply_text("Отменено.", reply_markup=main_kb())
+        return ConversationHandler.END
+    cow_id = parse_cow_choice(update.message.text)
+    cow = get_cow(cow_id) if cow_id else None
+    if not cow:
+        await update.message.reply_text("Выбери корову из списка.")
+        return EXP_COW
+    ctx.user_data["exp_cow_id"] = cow_id
+    ctx.user_data["exp_cow_name"] = cow[2]  # name field
+    await update.message.reply_text(
+        f"Корова: *{cow[2]}*\n\nВыбери категорию расхода:",
+        parse_mode="Markdown", reply_markup=cat_kb()
+    )
+    return EXP_CATEGORY
+
+
+async def exp_category(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == "❌ Отмена":
+        await update.message.reply_text("Отменено.", reply_markup=main_kb())
+        return ConversationHandler.END
+    if update.message.text not in EXP_CATEGORIES:
+        await update.message.reply_text("Выбери категорию из списка.")
+        return EXP_CATEGORY
+    ctx.user_data["exp_cat"] = update.message.text
+    await update.message.reply_text(
+        f"Категория: *{update.message.text}*\n\nВведи сумму (сомон):",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup([["❌ Отмена"]], resize_keyboard=True)
+    )
+    return EXP_AMOUNT
+
+
+async def exp_amount(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == "❌ Отмена":
+        await update.message.reply_text("Отменено.", reply_markup=main_kb())
+        return ConversationHandler.END
+    try:
+        amount = float(update.message.text.replace(" ", "").replace(",", ""))
+        if amount <= 0: raise ValueError
+    except ValueError:
+        await update.message.reply_text("Введи правильную сумму, например: 50000")
+        return EXP_AMOUNT
+    ctx.user_data["exp_amount"] = amount
+    await update.message.reply_text(
+        "Добавь заметку (необязательно):",
+        reply_markup=ReplyKeyboardMarkup([["⏭ Пропустить"], ["❌ Отмена"]], resize_keyboard=True)
+    )
+    return EXP_NOTE
+
+
+async def exp_note(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text == "❌ Отмена":
+        await update.message.reply_text("Отменено.", reply_markup=main_kb())
+        return ConversationHandler.END
+    note = "" if text == "⏭ Пропустить" else text
+    uid = update.effective_user.id
+    d = ctx.user_data
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO expenses (user_id, cow_id, category, amount, note, created_at) VALUES (?,?,?,?,?,?)",
+            (uid, d["exp_cow_id"], d["exp_cat"], d["exp_amount"], note, datetime.now().isoformat())
+        )
+    note_str = f"\n📝 {note}" if note else ""
+    await update.message.reply_text(
+        f"✅ Расход записан!\n\n"
+        f"🐄 *{d['exp_cow_name']}*\n"
+        f"{d['exp_cat']} — *{fmt_num(d['exp_amount'])} сомон*{note_str}",
+        parse_mode="Markdown", reply_markup=main_kb()
+    )
+    return ConversationHandler.END
+
+
+# ── Продать корову ─────────────────────────────────────────────────────────────
+async def sell_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await check_access(update): return ConversationHandler.END
+    uid = update.effective_user.id
+    cows = get_active_cows(uid)
+    if not cows:
+        await update.message.reply_text("❌ Нет активных коров.", reply_markup=main_kb())
+        return ConversationHandler.END
+    await update.message.reply_text(
+        "💰 *Продажа коровы*\n\nКакую корову продаёшь?",
+        parse_mode="Markdown", reply_markup=cows_kb(cows)
+    )
+    return SELL_COW
+
+
+async def sell_cow(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == "❌ Отмена":
+        await update.message.reply_text("Отменено.", reply_markup=main_kb())
+        return ConversationHandler.END
+    cow_id = parse_cow_choice(update.message.text)
+    cow = get_cow(cow_id) if cow_id else None
+    if not cow:
+        await update.message.reply_text("Выбери корову из списка.")
+        return SELL_COW
+    ctx.user_data["sell_cow_id"] = cow_id
+    ctx.user_data["sell_cow"] = cow
+    await update.message.reply_text(
+        f"🐄 *{cow[2]}*\n\nВведи цену продажи (сомон):",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup([["❌ Отмена"]], resize_keyboard=True)
+    )
+    return SELL_PRICE
+
+
+async def sell_price_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == "❌ Отмена":
+        await update.message.reply_text("Отменено.", reply_markup=main_kb())
+        return ConversationHandler.END
+    try:
+        price = float(update.message.text.replace(" ", "").replace(",", ""))
+        if price <= 0: raise ValueError
+    except ValueError:
+        await update.message.reply_text("Введи правильную цену:")
+        return SELL_PRICE
+    ctx.user_data["sell_price"] = price
+    await update.message.reply_text(
+        "Введи вес при продаже (кг) — необязательно:",
+        reply_markup=ReplyKeyboardMarkup([["⏭ Пропустить"], ["❌ Отмена"]], resize_keyboard=True)
+    )
+    return SELL_WEIGHT
+
+
+async def sell_weight_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text == "❌ Отмена":
+        await update.message.reply_text("Отменено.", reply_markup=main_kb())
+        return ConversationHandler.END
+    ctx.user_data["sell_weight"] = 0 if text == "⏭ Пропустить" else float(text.replace(",", ".") or 0)
+    await update.message.reply_text(
+        "Добавь заметку (необязательно):",
+        reply_markup=ReplyKeyboardMarkup([["⏭ Пропустить"], ["❌ Отмена"]], resize_keyboard=True)
+    )
+    return SELL_NOTE
+
+
+async def sell_note_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text == "❌ Отмена":
+        await update.message.reply_text("Отменено.", reply_markup=main_kb())
+        return ConversationHandler.END
+    note = "" if text == "⏭ Пропустить" else text
+    d = ctx.user_data
+    cow = d["sell_cow"]
+    cow_id = d["sell_cow_id"]
+
+    buy_price = cow[3]
+    exp_total = total_expenses(cow_id)
+    sell_price = d["sell_price"]
+    total_cost = buy_price + exp_total
+    profit = sell_price - total_cost
+    days = days_owned(cow[5])
+
+    with db() as conn:
+        conn.execute(
+            "UPDATE cows SET status='sold', sell_price=?, sell_weight=?, sell_date=?, sell_note=? WHERE id=?",
+            (sell_price, d["sell_weight"], datetime.now().isoformat(), note, cow_id)
+        )
+
+    emoji = "🟢" if profit >= 0 else "🔴"
+    profit_str = f"+{fmt_num(profit)}" if profit >= 0 else f"-{fmt_num(abs(profit))}"
+
+    await update.message.reply_text(
+        f"💰 *{cow[2]} продана!*\n\n"
+        f"📅 Дней в хозяйстве: {days}\n\n"
+        f"💸 *Расходы:*\n"
+        f"  • Цена покупки: {fmt_num(buy_price)} сомон\n"
+        f"  • Корм и уход: {fmt_num(exp_total)} сомон\n"
+        f"  • *Итого потрачено: {fmt_num(total_cost)} сомон*\n\n"
+        f"💵 Цена продажи: *{fmt_num(sell_price)} сомон*\n\n"
+        f"{emoji} *Прибыль/Убыток: {profit_str} сомон*",
+        parse_mode="Markdown", reply_markup=main_kb()
+    )
+    return ConversationHandler.END
+
+
+# ── Мои коровы ────────────────────────────────────────────────────────────────
+async def my_cows(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await check_access(update): return
+    uid = update.effective_user.id
+    cows = get_active_cows(uid)
+    if not cows:
+        await update.message.reply_text(
+            "🐄 Активных коров нет.\nНажми *🐄 Добавить корову*.",
+            parse_mode="Markdown", reply_markup=main_kb()
+        )
+        return
+
+    lines = ["📊 *Мои коровы:*\n"]
+    for cow in cows:
+        cow_id, name, buy_price, buy_weight, buy_date = cow
+        exp_total = total_expenses(cow_id)
+        days = days_owned(buy_date)
+        total_cost = buy_price + exp_total
+        wt = f", {fmt_num(buy_weight)} кг" if buy_weight else ""
+        lines.append(
+            f"🐄 *{name}* (#{cow_id})\n"
+            f"  📅 Дней в хозяйстве: {days}\n"
+            f"  💰 Куплена за: {fmt_num(buy_price)} сомон{wt}\n"
+            f"  💸 Расходы: {fmt_num(exp_total)} сомон\n"
+            f"  📊 Итого вложено: *{fmt_num(total_cost)} сомон*\n"
+        )
+
+        # По категориям
+        cats = expenses_by_category(cow_id)
+        if cats:
+            for cat, amt in cats:
+                lines.append(f"    {cat}: {fmt_num(amt)} сомон")
+        lines.append("")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=main_kb())
+
+
+# ── Отчёты ────────────────────────────────────────────────────────────────────
+async def report_today(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await check_access(update): return
+    uid = update.effective_user.id
+    rows = today_expenses(uid)
+    today_str = date.today().strftime("%d.%m.%Y")
+
+    if not rows:
+        await update.message.reply_text(
+            f"📅 *Сегодня ({today_str}) расходов нет.*",
+            parse_mode="Markdown", reply_markup=main_kb()
+        )
+        return
+
+    total = sum(r[2] for r in rows)
+    lines = [f"📅 *Отчёт за сегодня ({today_str})*\n"]
+
+    current_cow = None
+    for cow_name, cat, amt, note, created_at in rows:
+        if cow_name != current_cow:
+            lines.append(f"\n🐄 *{cow_name}*")
+            current_cow = cow_name
+        t = datetime.fromisoformat(created_at).strftime("%H:%M")
+        note_str = f" — {note}" if note else ""
+        lines.append(f"  {t} | {cat}: {fmt_num(amt)} сомон{note_str}")
+
+    lines.append(f"\n💰 *Итого за сегодня: {fmt_num(total)} сомон*")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=main_kb())
+
+
+async def report_month(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await check_access(update): return
+    uid = update.effective_user.id
+    today = date.today()
+    start = today.replace(day=1).isoformat()
+    end = today.isoformat()
+    rows = period_expenses(uid, start, end)
+
+    if not rows:
+        await update.message.reply_text("📆 В этом месяце расходов нет.", reply_markup=main_kb())
+        return
+
+    total = sum(r[2] for r in rows)
+    lines = [f"📆 *Отчёт за {today.strftime('%B %Y')}*\n"]
+
+    current_cow = None
+    cow_total = 0
+    for cow_name, cat, amt in rows:
+        if cow_name != current_cow:
+            if current_cow:
+                lines.append(f"  💰 Итого: {fmt_num(cow_total)} сомон\n")
+            lines.append(f"🐄 *{cow_name}*")
+            current_cow = cow_name
+            cow_total = 0
+        lines.append(f"  {cat}: {fmt_num(amt)} сомон")
+        cow_total += amt
+    if current_cow:
+        lines.append(f"  💰 Итого: {fmt_num(cow_total)} сомон")
+
+    lines.append(f"\n📊 *Всего за месяц: {fmt_num(total)} сомон*")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=main_kb())
+
+
+async def report_all_time(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await check_access(update): return
+    uid = update.effective_user.id
+    cows = get_active_cows(uid)
+    if not cows:
+        await update.message.reply_text(
+            "🐄 Активных коров нет.", reply_markup=main_kb()
+        )
+        return
+
+    lines = ["📋 *Отчёт за всё время (активные коровы)*\n"]
+    grand_total = 0
+
+    for cow in cows:
+        cow_id, name, buy_price, buy_weight, buy_date = cow
+        exp_total = total_expenses(cow_id)
+        days = days_owned(buy_date)
+        total_cost = buy_price + exp_total
+        grand_total += total_cost
+        buy_date_str = datetime.fromisoformat(buy_date).strftime("%d.%m.%Y")
+        wt = f", {fmt_num(buy_weight)} кг" if buy_weight else ""
+
+        lines.append(
+            f"🐄 *{name}* (#{cow_id})\n"
+            f"  📅 Куплена: {buy_date_str} ({days} дней назад)\n"
+            f"  💰 Цена покупки: {fmt_num(buy_price)} сомон{wt}\n"
+            f"  💸 Расходы на корм/уход: {fmt_num(exp_total)} сомон\n"
+            f"  📊 Итого вложено: *{fmt_num(total_cost)} сомон*\n"
+        )
+
+        cats = expenses_by_category(cow_id)
+        if cats:
+            lines.append("  Расходы по категориям:")
+            for cat, amt in cats:
+                lines.append(f"    {cat}: {fmt_num(amt)} сомон")
+        lines.append("")
+
+    lines.append(f"💰 *Всего вложено во всех коров: {fmt_num(grand_total)} сомон*")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=main_kb())
+
+
+# ── Ежедневный автоотчёт ──────────────────────────────────────────────────────
+async def daily_auto_report(ctx: ContextTypes.DEFAULT_TYPE):
+    rows = today_expenses()
+    if not rows:
+        return
+    total = sum(r[2] for r in rows)
+    lines = [f"🌙 *Итог дня ({date.today().strftime('%d.%m.%Y')})*\n"]
+    current_cow = None
+    for cow_name, cat, amt, note, created_at in rows:
+        if cow_name != current_cow:
+            lines.append(f"\n🐄 *{cow_name}*")
+            current_cow = cow_name
+        note_str = f" — {note}" if note else ""
+        lines.append(f"  {cat}: {fmt_num(amt)} сомон{note_str}")
+    lines.append(f"\n💰 *Итого за день: {fmt_num(total)} сомон*")
+
+    # Отправляем всем разрешённым пользователям
+    for uid in ALLOWED_USERS:
+        try:
+            await ctx.bot.send_message(uid, "\n".join(lines), parse_mode="Markdown")
+        except Exception as e:
+            logger.warning(f"Ошибка отправки отчёта для {uid}: {e}")
+
+
+# ── Главная ────────────────────────────────────────────────────────────────────
+def main():
+    init_db()
+    app = Application.builder().token(BOT_TOKEN).build()
+
+    def conv(entry_text, entry_handler, states):
+        return ConversationHandler(
+            entry_points=[MessageHandler(filters.Regex(f"^{entry_text}$"), entry_handler)],
+            states=states,
+            fallbacks=[MessageHandler(filters.Regex("^❌ Отмена$"), lambda u, c: (
+                u.message.reply_text("Отменено.", reply_markup=main_kb()),
+                ConversationHandler.END
+            )[-1])],
+        )
+
+    # Добавить корову
+    add_cow_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^🐄 Добавить корову$"), add_cow_start)],
+        states={
+            COW_NAME:   [MessageHandler(filters.TEXT & ~filters.COMMAND, cow_name)],
+            COW_PRICE:  [MessageHandler(filters.TEXT & ~filters.COMMAND, cow_price)],
+            COW_WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, cow_weight)],
+            COW_NOTE:   [MessageHandler(filters.TEXT & ~filters.COMMAND, cow_note)],
+        },
+        fallbacks=[],
+    )
+
+    # Расход
+    exp_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^💸 Записать расход$"), add_exp_start)],
+        states={
+            EXP_COW:      [MessageHandler(filters.TEXT & ~filters.COMMAND, exp_cow)],
+            EXP_CATEGORY: [MessageHandler(filters.TEXT & ~filters.COMMAND, exp_category)],
+            EXP_AMOUNT:   [MessageHandler(filters.TEXT & ~filters.COMMAND, exp_amount)],
+            EXP_NOTE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, exp_note)],
+        },
+        fallbacks=[],
+    )
+
+    # Продажа
+    sell_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^💰 Продать корову$"), sell_start)],
+        states={
+            SELL_COW:    [MessageHandler(filters.TEXT & ~filters.COMMAND, sell_cow)],
+            SELL_PRICE:  [MessageHandler(filters.TEXT & ~filters.COMMAND, sell_price_handler)],
+            SELL_WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sell_weight_handler)],
+            SELL_NOTE:   [MessageHandler(filters.TEXT & ~filters.COMMAND, sell_note_handler)],
+        },
+        fallbacks=[],
+    )
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(add_cow_conv)
+    app.add_handler(exp_conv)
+    app.add_handler(sell_conv)
+    app.add_handler(MessageHandler(filters.Regex("^📊 Мои коровы$"), my_cows))
+    app.add_handler(MessageHandler(filters.Regex("^📅 Отчёт за сегодня$"), report_today))
+    app.add_handler(MessageHandler(filters.Regex("^📆 Отчёт за месяц$"), report_month))
+    app.add_handler(MessageHandler(filters.Regex("^📋 Отчёт за всё время$"), report_all_time))
+    app.add_handler(MessageHandler(filters.Regex("^ℹ️ Помощь$"), help_cmd))
+
+    # Авто-отчёт в 21:00
+    app.job_queue.run_daily(
+        daily_auto_report,
+        time=datetime.strptime("21:00", "%H:%M").time(),
+    )
+
+    logger.info("🐄 Бот запущен!")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()
