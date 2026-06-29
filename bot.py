@@ -6,6 +6,7 @@
 
 import logging
 import sqlite3
+import libsql
 import os
 import hashlib
 from contextlib import asynccontextmanager
@@ -28,6 +29,12 @@ DB_PATH = "cows.db"
 PORT = int(os.getenv("PORT", "10000"))
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")  # Render выставляет это сам
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET") or hashlib.sha256(BOT_TOKEN.encode()).hexdigest()
+
+# ── Настройки БД ───────────────────────────────────────────────────────────────
+# Turso (libSQL) — облачная БД, переживает перезапуск/деплой на Render.
+# Если переменные не заданы — используется локальный файл cows.db (для разработки).
+TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL")
+TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
 
 # ── Разрешённые пользователи ──────────────────────────────────────────────────
 ALLOWED_USERS = {
@@ -88,105 +95,112 @@ EXP_CATEGORIES = [
 OWNER_ID = 6985425925  # Bobojon — только он управляет пользователями
 
 # ── БД ───────────────────────────────────────────────────────────────────────
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.executescript("""
-        CREATE TABLE IF NOT EXISTS cows (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id     INTEGER NOT NULL,
-            name        TEXT    NOT NULL,
-            buy_price   REAL    NOT NULL,
-            buy_weight  REAL,
-            buy_date    TEXT    NOT NULL,
-            note        TEXT,
-            status      TEXT    NOT NULL DEFAULT 'active',
-            sell_price  REAL,
-            sell_weight REAL,
-            sell_date   TEXT,
-            sell_note   TEXT,
-            photo_id    TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS expenses (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id     INTEGER NOT NULL,
-            cow_id      INTEGER NOT NULL,
-            category    TEXT    NOT NULL,
-            amount      REAL    NOT NULL,
-            note        TEXT,
-            created_at  TEXT    NOT NULL,
-            FOREIGN KEY (cow_id) REFERENCES cows(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS stock (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            feed_name   TEXT    NOT NULL,
-            kg_total    REAL    NOT NULL,
-            kg_left     REAL    NOT NULL,
-            price_total REAL    NOT NULL,
-            bought_date TEXT    NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS stock_writeoffs (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            stock_id    INTEGER NOT NULL,
-            kg_used     REAL    NOT NULL,
-            created_at  TEXT    NOT NULL,
-            FOREIGN KEY (stock_id) REFERENCES stock(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS users (
-            user_id     INTEGER PRIMARY KEY,
-            name        TEXT,
-            added_date  TEXT    NOT NULL,
-            last_seen   TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS cow_photos (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            cow_id      INTEGER NOT NULL,
-            photo_id    TEXT    NOT NULL,
-            added_at    TEXT    NOT NULL,
-            FOREIGN KEY (cow_id) REFERENCES cows(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS products (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            name        TEXT    NOT NULL UNIQUE,
-            unit        TEXT    NOT NULL
-        );
-    """)
-    # Добавляем владельца в таблицу пользователей если его нет
-    c.execute(
-        "INSERT OR IGNORE INTO users (user_id, name, added_date) VALUES (?,?,?)",
-        (OWNER_ID, "Bobojon (владелец)", datetime.now().isoformat())
-    )
-    # Добавляем существующих пользователей
-    for uid in ALLOWED_USERS:
-        c.execute(
-            "INSERT OR IGNORE INTO users (user_id, name, added_date) VALUES (?,?,?)",
-            (uid, f"Пользователь {uid}", datetime.now().isoformat())
-        )
-    # Добавляем дефолтные товары если их нет
-    default_products = [
-        ("🌾 Отруб", "кг"),
-        ("🌽 Кунчора", "кг"),
-        ("🌿 Ках", "кг"),
-    ]
-    for name, unit in default_products:
-        c.execute("INSERT OR IGNORE INTO products (name, unit) VALUES (?,?)", (name, unit))
-    conn.commit()
-    try:
-        conn.execute("ALTER TABLE cows ADD COLUMN photo_id TEXT")
-        conn.commit()
-    except:
-        pass  # Колонка уже есть
-    conn.close()
-
-
 def db():
+    if TURSO_DATABASE_URL:
+        return libsql.connect(database=TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
     return sqlite3.connect(DB_PATH)
+
+
+def init_db():
+    with db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS cows (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL,
+                name        TEXT    NOT NULL,
+                buy_price   REAL    NOT NULL,
+                buy_weight  REAL,
+                buy_date    TEXT    NOT NULL,
+                note        TEXT,
+                status      TEXT    NOT NULL DEFAULT 'active',
+                sell_price  REAL,
+                sell_weight REAL,
+                sell_date   TEXT,
+                sell_note   TEXT,
+                photo_id    TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS expenses (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL,
+                cow_id      INTEGER NOT NULL,
+                category    TEXT    NOT NULL,
+                amount      REAL    NOT NULL,
+                note        TEXT,
+                created_at  TEXT    NOT NULL,
+                FOREIGN KEY (cow_id) REFERENCES cows(id)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS stock (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                feed_name   TEXT    NOT NULL,
+                kg_total    REAL    NOT NULL,
+                kg_left     REAL    NOT NULL,
+                price_total REAL    NOT NULL,
+                bought_date TEXT    NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS stock_writeoffs (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                stock_id    INTEGER NOT NULL,
+                kg_used     REAL    NOT NULL,
+                created_at  TEXT    NOT NULL,
+                FOREIGN KEY (stock_id) REFERENCES stock(id)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id     INTEGER PRIMARY KEY,
+                name        TEXT,
+                added_date  TEXT    NOT NULL,
+                last_seen   TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS cow_photos (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                cow_id      INTEGER NOT NULL,
+                photo_id    TEXT    NOT NULL,
+                added_at    TEXT    NOT NULL,
+                FOREIGN KEY (cow_id) REFERENCES cows(id)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS products (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT    NOT NULL UNIQUE,
+                unit        TEXT    NOT NULL
+            )
+        """)
+
+        # Добавляем владельца в таблицу пользователей если его нет
+        conn.execute(
+            "INSERT OR IGNORE INTO users (user_id, name, added_date) VALUES (?,?,?)",
+            (OWNER_ID, "Bobojon (владелец)", datetime.now().isoformat())
+        )
+        # Добавляем существующих пользователей
+        for uid in ALLOWED_USERS:
+            conn.execute(
+                "INSERT OR IGNORE INTO users (user_id, name, added_date) VALUES (?,?,?)",
+                (uid, f"Пользователь {uid}", datetime.now().isoformat())
+            )
+        # Добавляем дефолтные товары если их нет
+        default_products = [
+            ("🌾 Отруб", "кг"),
+            ("🌽 Кунчора", "кг"),
+            ("🌿 Ках", "кг"),
+        ]
+        for name, unit in default_products:
+            conn.execute("INSERT OR IGNORE INTO products (name, unit) VALUES (?,?)", (name, unit))
+
+    try:
+        with db() as conn:
+            conn.execute("ALTER TABLE cows ADD COLUMN photo_id TEXT")
+    except Exception:
+        pass  # Колонка уже есть
 
 
 def get_allowed_users():
