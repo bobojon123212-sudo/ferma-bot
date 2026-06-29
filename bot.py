@@ -61,7 +61,9 @@ async def check_access(update: Update) -> bool:
     ADMIN_ADD_ID, ADMIN_ADD_NAME, ADMIN_DEL_ID,
     # Фото коровы
     PHOTO_COW, PHOTO_FILE,
-) = range(27)
+    # Товары
+    PROD_NAME, PROD_UNIT, PROD_DEL,
+) = range(30)
 
 FEED_TYPES = ["🌾 Отруб", "🌽 Кунчора", "🌿 Ках", "🌿 Другой корм"]
 
@@ -136,6 +138,12 @@ def init_db():
             added_at    TEXT    NOT NULL,
             FOREIGN KEY (cow_id) REFERENCES cows(id)
         );
+
+        CREATE TABLE IF NOT EXISTS products (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT    NOT NULL UNIQUE,
+            unit        TEXT    NOT NULL
+        );
     """)
     # Добавляем владельца в таблицу пользователей если его нет
     c.execute(
@@ -148,8 +156,15 @@ def init_db():
             "INSERT OR IGNORE INTO users (user_id, name, added_date) VALUES (?,?,?)",
             (uid, f"Пользователь {uid}", datetime.now().isoformat())
         )
+    # Добавляем дефолтные товары если их нет
+    default_products = [
+        ("🌾 Отруб", "кг"),
+        ("🌽 Кунчора", "кг"),
+        ("🌿 Ках", "кг"),
+    ]
+    for name, unit in default_products:
+        c.execute("INSERT OR IGNORE INTO products (name, unit) VALUES (?,?)", (name, unit))
     conn.commit()
-    # Миграция: добавляем photo_id если не существует
     try:
         conn.execute("ALTER TABLE cows ADD COLUMN photo_id TEXT")
         conn.commit()
@@ -243,7 +258,7 @@ def main_kb(user_id=None):
         ["📋 Отчёт за всё время",   "💸 Расход на всех коров"],
         ["📦 Купить корм",          "📤 Списать корм"],
         ["🏪 Склад",                "📸 Фото коров"],
-        ["ℹ️ Помощь"],
+        ["🗂 Товары",               "ℹ️ Помощь"],
     ]
     if user_id == OWNER_ID:
         kb.append(["👥 Пользователи"])
@@ -258,7 +273,9 @@ def cows_kb(cows, cancel=True):
 
 
 def cat_kb():
-    rows = [EXP_CATEGORIES[i:i+2] for i in range(0, len(EXP_CATEGORIES), 2)]
+    products = get_products()
+    cats = [p[1] for p in products] + ["💧 Вода/Поилка", "💊 Лекарства", "👨‍⚕️ Ветеринар", "🔧 Инвентарь", "🚛 Транспорт", "💰 Другое"]
+    rows = [cats[i:i+2] for i in range(0, len(cats), 2)]
     rows.append(["❌ Отмена"])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
@@ -467,7 +484,9 @@ async def exp_category(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "❌ Отмена":
         await update.message.reply_text("Отменено.", reply_markup=main_kb())
         return ConversationHandler.END
-    if update.message.text not in EXP_CATEGORIES:
+    products = get_products()
+    all_cats = [p[1] for p in products] + ["💧 Вода/Поилка", "💊 Лекарства", "👨‍⚕️ Ветеринар", "🔧 Инвентарь", "🚛 Транспорт", "💰 Другое"]
+    if update.message.text not in all_cats:
         await update.message.reply_text("Выбери категорию из списка.")
         return EXP_CATEGORY
     ctx.user_data["exp_cat"] = update.message.text
@@ -785,7 +804,9 @@ async def all_exp_category(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "❌ Отмена":
         await update.message.reply_text("Отменено.", reply_markup=main_kb())
         return ConversationHandler.END
-    if update.message.text not in EXP_CATEGORIES:
+    products = get_products()
+    all_cats = [p[1] for p in products] + ["💧 Вода/Поилка", "💊 Лекарства", "👨‍⚕️ Ветеринар", "🔧 Инвентарь", "🚛 Транспорт", "💰 Другое"]
+    if update.message.text not in all_cats:
         await update.message.reply_text("Выбери категорию из списка.")
         return ALL_EXP_CATEGORY
     ctx.user_data["all_exp_cat"] = update.message.text
@@ -843,6 +864,121 @@ async def all_exp_note(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         lines.append(f"  🐄 {cow[1]}: {fmt_num(share)} сомон")
 
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=main_kb())
+    return ConversationHandler.END
+
+
+# ── Товары ────────────────────────────────────────────────────────────────────
+def get_products():
+    with db() as conn:
+        return conn.execute("SELECT id, name, unit FROM products ORDER BY name").fetchall()
+
+
+def products_kb():
+    return ReplyKeyboardMarkup([
+        ["➕ Добавить товар"],
+        ["❌ Удалить товар"],
+        ["🔙 Назад"],
+    ], resize_keyboard=True)
+
+
+async def products_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await check_access(update): return
+    products = get_products()
+    lines = ["🗂 *Справочник товаров:*\n"]
+    for pid, name, unit in products:
+        lines.append(f"  {name} — *{unit}*")
+    lines.append("\nВыбери действие:")
+    await update.message.reply_text(
+        "\n".join(lines),
+        parse_mode="Markdown",
+        reply_markup=products_kb()
+    )
+
+
+async def product_add_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await check_access(update): return ConversationHandler.END
+    await update.message.reply_text(
+        "➕ *Добавить товар*\n\nВведи наименование товара:\n_(например: Ячмень, Силос, Комбикорм)_",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup([["❌ Отмена"]], resize_keyboard=True)
+    )
+    return PROD_NAME
+
+
+async def product_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == "❌ Отмена":
+        await update.message.reply_text("Отменено.", reply_markup=main_kb(update.effective_user.id))
+        return ConversationHandler.END
+    ctx.user_data["prod_name"] = update.message.text.strip()
+    await update.message.reply_text(
+        f"Наименование: *{ctx.user_data['prod_name']}*\n\nВыбери единицу измерения:",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup([
+            ["кг", "т"],
+            ["л", "шт"],
+            ["❌ Отмена"]
+        ], resize_keyboard=True)
+    )
+    return PROD_UNIT
+
+
+async def product_unit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == "❌ Отмена":
+        await update.message.reply_text("Отменено.", reply_markup=main_kb(update.effective_user.id))
+        return ConversationHandler.END
+    unit = update.message.text
+    if unit not in ["кг", "т", "л", "шт"]:
+        await update.message.reply_text("Выбери единицу из списка: кг, т, л, шт")
+        return PROD_UNIT
+    name = ctx.user_data["prod_name"]
+    try:
+        with db() as conn:
+            conn.execute("INSERT INTO products (name, unit) VALUES (?,?)", (name, unit))
+        await update.message.reply_text(
+            f"✅ Товар добавлен!\n\n*{name}* — {unit}",
+            parse_mode="Markdown", reply_markup=main_kb(update.effective_user.id)
+        )
+    except:
+        await update.message.reply_text(
+            f"⚠️ Товар *{name}* уже существует.",
+            parse_mode="Markdown", reply_markup=main_kb(update.effective_user.id)
+        )
+    return ConversationHandler.END
+
+
+async def product_del_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not await check_access(update): return ConversationHandler.END
+    products = get_products()
+    if not products:
+        await update.message.reply_text("Товаров нет.", reply_markup=main_kb(update.effective_user.id))
+        return ConversationHandler.END
+    rows = [[f"❌ {p[1]} ({p[2]}) #{p[0]}"] for p in products]
+    rows.append(["🔙 Назад"])
+    await update.message.reply_text(
+        "❌ *Удалить товар*\n\nКакой товар удалить?",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup(rows, resize_keyboard=True)
+    )
+    return PROD_DEL
+
+
+async def product_del_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == "🔙 Назад":
+        await update.message.reply_text("Главное меню:", reply_markup=main_kb(update.effective_user.id))
+        return ConversationHandler.END
+    try:
+        pid = int(update.message.text.split("#")[-1])
+    except:
+        await update.message.reply_text("Выбери товар из списка.")
+        return PROD_DEL
+    with db() as conn:
+        prod = conn.execute("SELECT name FROM products WHERE id=?", (pid,)).fetchone()
+        conn.execute("DELETE FROM products WHERE id=?", (pid,))
+    name = prod[0] if prod else "Товар"
+    await update.message.reply_text(
+        f"✅ *{name}* удалён.",
+        parse_mode="Markdown", reply_markup=main_kb(update.effective_user.id)
+    )
     return ConversationHandler.END
 
 
@@ -1455,6 +1591,23 @@ def main():
         fallbacks=[],
     )
 
+    prod_add_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^➕ Добавить товар$"), product_add_start)],
+        states={
+            PROD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, product_name)],
+            PROD_UNIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, product_unit)],
+        },
+        fallbacks=[],
+    )
+
+    prod_del_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^❌ Удалить товар$"), product_del_start)],
+        states={
+            PROD_DEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, product_del_confirm)],
+        },
+        fallbacks=[],
+    )
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(add_cow_conv)
@@ -1466,6 +1619,9 @@ def main():
     app.add_handler(admin_add_conv)
     app.add_handler(admin_del_conv)
     app.add_handler(add_photo_conv)
+    app.add_handler(prod_add_conv)
+    app.add_handler(prod_del_conv)
+    app.add_handler(MessageHandler(filters.Regex("^🗂 Товары$"), products_menu))
     app.add_handler(MessageHandler(filters.Regex("^🏪 Склад$"), stock_view))
     app.add_handler(MessageHandler(filters.Regex("^👥 Пользователи$"), admin_panel))
     app.add_handler(MessageHandler(filters.Regex("^👁 Список пользователей$"), admin_users_list))
@@ -1487,4 +1643,8 @@ def main():
 
 
 if __name__ == "__main__":
+    import asyncio
+    import sys
+    if sys.version_info >= (3, 12):
+        asyncio.set_event_loop(asyncio.new_event_loop())
     main()
