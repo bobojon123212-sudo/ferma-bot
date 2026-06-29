@@ -7,15 +7,27 @@
 import logging
 import sqlite3
 import os
+import hashlib
+from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     filters, ContextTypes, ConversationHandler,
 )
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import HTMLResponse, PlainTextResponse, Response
+from starlette.routing import Route
+import uvicorn
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8669109340:AAFR5sf3bfrK4F3H12kNxYbcnQDuAUPVg1U")
+BOT_TOKEN = os.environ["BOT_TOKEN"]
 DB_PATH = "cows.db"
+
+# ── Настройки webhook (используется автоматически на Render) ─────────────────
+PORT = int(os.getenv("PORT", "10000"))
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")  # Render выставляет это сам
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET") or hashlib.sha256(BOT_TOKEN.encode()).hexdigest()
 
 # ── Разрешённые пользователи ──────────────────────────────────────────────────
 ALLOWED_USERS = {
@@ -1478,6 +1490,55 @@ async def daily_auto_report(ctx: ContextTypes.DEFAULT_TYPE):
             logger.warning(f"Ошибка отправки отчёта для {uid}: {e}")
 
 
+# ── Webhook-сервер (используется на Render) ───────────────────────────────────
+def build_webhook_app(app: Application) -> Starlette:
+    webhook_path = f"/webhook/{WEBHOOK_SECRET}"
+    webhook_url = f"{RENDER_EXTERNAL_URL.rstrip('/')}{webhook_path}"
+
+    async def telegram_webhook(request: Request) -> Response:
+        if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != WEBHOOK_SECRET:
+            return PlainTextResponse("Forbidden", status_code=403)
+        update = Update.de_json(await request.json(), app.bot)
+        await app.update_queue.put(update)
+        return PlainTextResponse("OK")
+
+    async def health(request: Request) -> Response:
+        return HTMLResponse(
+            "<html><head><meta charset='utf-8'><title>Ferma Bot</title></head>"
+            "<body style='font-family:sans-serif;text-align:center;padding-top:4em'>"
+            "<h1>🐄 Ferma Bot</h1>"
+            "<p>Бот работает в режиме webhook ✅</p>"
+            "</body></html>"
+        )
+
+    @asynccontextmanager
+    async def lifespan(_):
+        await app.bot.set_webhook(
+            url=webhook_url,
+            secret_token=WEBHOOK_SECRET,
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+        )
+        logger.info(f"Webhook установлен: {webhook_url}")
+        await app.initialize()
+        await app.start()
+        yield
+        await app.stop()
+        await app.shutdown()
+
+    return Starlette(
+        routes=[
+            Route("/", health, methods=["GET"]),
+            Route(webhook_path, telegram_webhook, methods=["POST"]),
+        ],
+        lifespan=lifespan,
+    )
+
+
+def run_webhook_server(app: Application):
+    uvicorn.run(build_webhook_app(app), host="0.0.0.0", port=PORT)
+
+
 # ── Главная ────────────────────────────────────────────────────────────────────
 def main():
     init_db()
@@ -1638,8 +1699,12 @@ def main():
         time=datetime.strptime("21:00", "%H:%M").time(),
     )
 
-    logger.info("🐄 Бот запущен!")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    if RENDER_EXTERNAL_URL:
+        logger.info("🐄 Бот запущен в режиме webhook!")
+        run_webhook_server(app)
+    else:
+        logger.info("🐄 Бот запущен в режиме polling (локально)!")
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
