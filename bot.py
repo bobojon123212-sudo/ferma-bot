@@ -11,6 +11,7 @@ import os
 import hashlib
 from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta
+from zoneinfo import ZoneInfo
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
@@ -35,6 +36,19 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET") or hashlib.sha256(BOT_TOKEN.encode(
 # Если переменные не заданы — используется локальный файл cows.db (для разработки).
 TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL")
 TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
+
+# ── Часовой пояс ───────────────────────────────────────────────────────────────
+# Render выполняет процесс в UTC, а пользователи бота — в Таджикистане,
+# поэтому все даты/время приводим к местному поясу независимо от TZ сервера.
+TZ = ZoneInfo("Asia/Dushanbe")
+
+
+def now_local() -> datetime:
+    return datetime.now(TZ).replace(tzinfo=None)
+
+
+def today_local() -> date:
+    return now_local().date()
 
 # ── Разрешённые пользователи ──────────────────────────────────────────────────
 ALLOWED_USERS = {
@@ -179,19 +193,19 @@ def init_db():
         # Добавляем владельца в таблицу пользователей если его нет
         conn.execute(
             "INSERT OR IGNORE INTO users (user_id, name, added_date) VALUES (?,?,?)",
-            (OWNER_ID, "Bobojon (владелец)", datetime.now().isoformat())
+            (OWNER_ID, "Bobojon (владелец)", now_local().isoformat())
         )
         # Добавляем существующих пользователей
         for uid in ALLOWED_USERS:
             conn.execute(
                 "INSERT OR IGNORE INTO users (user_id, name, added_date) VALUES (?,?,?)",
-                (uid, f"Пользователь {uid}", datetime.now().isoformat())
+                (uid, f"Пользователь {uid}", now_local().isoformat())
             )
         # Добавляем дефолтные товары если их нет
         default_products = [
             ("🌾 Отруб", "кг"),
             ("🌽 Кунчора", "кг"),
-            ("🌿 Ках", "кг"),
+            ("🌿 Ках", "шт"),
         ]
         for name, unit in default_products:
             conn.execute("INSERT OR IGNORE INTO products (name, unit) VALUES (?,?)", (name, unit))
@@ -214,7 +228,7 @@ def update_last_seen(user_id, name):
     with db() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO users (user_id, name, added_date, last_seen) VALUES (?, ?, COALESCE((SELECT added_date FROM users WHERE user_id=?), ?), ?)",
-            (user_id, name, user_id, datetime.now().isoformat(), datetime.now().isoformat())
+            (user_id, name, user_id, now_local().isoformat(), now_local().isoformat())
         )
 
 
@@ -252,7 +266,7 @@ def expenses_by_category(cow_id):
 
 
 def today_expenses(user_id=None):
-    today = date.today().isoformat()
+    today = today_local().isoformat()
     with db() as conn:
         return conn.execute(
             """SELECT c.name, e.category, e.amount, e.note, e.created_at
@@ -321,7 +335,7 @@ def parse_cow_choice(text):
 
 def days_owned(buy_date_str):
     bd = datetime.fromisoformat(buy_date_str).date()
-    return (date.today() - bd).days + 1
+    return (today_local() - bd).days + 1
 
 
 def fmt_num(n):
@@ -451,20 +465,20 @@ async def cow_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     with db() as conn:
         cursor = conn.execute(
             "INSERT INTO cows (user_id, name, buy_price, buy_weight, buy_date, note) VALUES (?,?,?,?,?,?)",
-            (uid, d["cow_name"], d["cow_price"], d["cow_weight"], datetime.now().isoformat(), d["cow_note"])
+            (uid, d["cow_name"], d["cow_price"], d["cow_weight"], now_local().isoformat(), d["cow_note"])
         )
         cow_id = cursor.lastrowid
         if photo_id:
             conn.execute(
                 "INSERT INTO cow_photos (cow_id, photo_id, added_at) VALUES (?,?,?)",
-                (cow_id, photo_id, datetime.now().isoformat())
+                (cow_id, photo_id, now_local().isoformat())
             )
     wt = f", {fmt_num(d['cow_weight'])} кг" if d["cow_weight"] else ""
     photo_str = "\n📸 Фото добавлено" if photo_id else ""
     await update.message.reply_text(
         f"✅ Корова *{d['cow_name']}* добавлена!\n\n"
         f"💰 Цена покупки: *{fmt_num(d['cow_price'])} сомон*{wt}\n"
-        f"📅 Дата: {date.today().strftime('%d.%m.%Y')}{photo_str}",
+        f"📅 Дата: {today_local().strftime('%d.%m.%Y')}{photo_str}",
         parse_mode="Markdown", reply_markup=main_kb(uid)
     )
     return ConversationHandler.END
@@ -553,7 +567,7 @@ async def exp_note(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     with db() as conn:
         conn.execute(
             "INSERT INTO expenses (user_id, cow_id, category, amount, note, created_at) VALUES (?,?,?,?,?,?)",
-            (uid, d["exp_cow_id"], d["exp_cat"], d["exp_amount"], note, datetime.now().isoformat())
+            (uid, d["exp_cow_id"], d["exp_cat"], d["exp_amount"], note, now_local().isoformat())
         )
     note_str = f"\n📝 {note}" if note else ""
     await update.message.reply_text(
@@ -650,7 +664,7 @@ async def sell_note_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     with db() as conn:
         conn.execute(
             "UPDATE cows SET status='sold', sell_price=?, sell_weight=?, sell_date=?, sell_note=? WHERE id=?",
-            (sell_price, d["sell_weight"], datetime.now().isoformat(), note, cow_id)
+            (sell_price, d["sell_weight"], now_local().isoformat(), note, cow_id)
         )
 
     emoji = "🟢" if profit >= 0 else "🔴"
@@ -712,7 +726,7 @@ async def report_today(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
     uid = update.effective_user.id
     rows = today_expenses(uid)
-    today_str = date.today().strftime("%d.%m.%Y")
+    today_str = today_local().strftime("%d.%m.%Y")
 
     if not rows:
         await update.message.reply_text(
@@ -740,7 +754,7 @@ async def report_today(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def report_month(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
     uid = update.effective_user.id
-    today = date.today()
+    today = today_local()
     start = today.replace(day=1).isoformat()
     end = today.isoformat()
     rows = period_expenses(uid, start, end)
@@ -878,7 +892,7 @@ async def all_exp_note(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         for cow in cows:
             conn.execute(
                 "INSERT INTO expenses (user_id, cow_id, category, amount, note, created_at) VALUES (?,?,?,?,?,?)",
-                (uid, cow[0], d["all_exp_cat"], share, note, datetime.now().isoformat())
+                (uid, cow[0], d["all_exp_cat"], share, note, now_local().isoformat())
             )
 
     lines = [
@@ -1090,7 +1104,7 @@ async def add_photo_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     with db() as conn:
         conn.execute(
             "INSERT INTO cow_photos (cow_id, photo_id, added_at) VALUES (?,?,?)",
-            (cow_id, photo_id, datetime.now().isoformat())
+            (cow_id, photo_id, now_local().isoformat())
         )
         count = conn.execute(
             "SELECT COUNT(*) FROM cow_photos WHERE cow_id=?", (cow_id,)
@@ -1193,7 +1207,7 @@ async def admin_add_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     with db() as conn:
         conn.execute(
             "INSERT INTO users (user_id, name, added_date) VALUES (?,?,?)",
-            (uid, name, datetime.now().isoformat())
+            (uid, name, now_local().isoformat())
         )
     await update.message.reply_text(
         f"✅ Пользователь добавлен!\n\n👤 *{name}*\n🆔 `{uid}`",
@@ -1301,7 +1315,7 @@ async def stock_price(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     with db() as conn:
         conn.execute(
             "INSERT INTO stock (feed_name, kg_total, kg_left, price_total, bought_date) VALUES (?,?,?,?,?)",
-            (d["stock_name"], kg, kg, price, datetime.now().isoformat())
+            (d["stock_name"], kg, kg, price, now_local().isoformat())
         )
     await update.message.reply_text(
         f"✅ Корм добавлен на склад!\n\n"
@@ -1414,13 +1428,13 @@ async def write_kg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         conn.execute("UPDATE stock SET kg_left=? WHERE id=?", (new_left, stock[0]))
         conn.execute(
             "INSERT INTO stock_writeoffs (stock_id, kg_used, created_at) VALUES (?,?,?)",
-            (stock[0], kg, datetime.now().isoformat())
+            (stock[0], kg, now_local().isoformat())
         )
         # Записываем расход на каждую корову
         for cow in cows:
             conn.execute(
                 "INSERT INTO expenses (user_id, cow_id, category, amount, note, created_at) VALUES (?,?,?,?,?,?)",
-                (uid, cow[0], category, share, f"Склад: {fmt_num(kg)} кг", datetime.now().isoformat())
+                (uid, cow[0], category, share, f"Склад: {fmt_num(kg)} кг", now_local().isoformat())
             )
 
     warn = "⚠️ Осталось мало корма!" if new_left / stock[2] < 0.2 else ""
@@ -1440,7 +1454,7 @@ async def write_kg(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ── Ежедневный автоотчёт ──────────────────────────────────────────────────────
 async def daily_auto_report(ctx: ContextTypes.DEFAULT_TYPE):
-    lines = [f"🌙 *Ежедневный отчёт ({date.today().strftime('%d.%m.%Y')})*\n"]
+    lines = [f"🌙 *Ежедневный отчёт ({today_local().strftime('%d.%m.%Y')})*\n"]
 
     # 1. Расходы за сегодня
     rows = today_expenses()
@@ -1707,10 +1721,10 @@ def main():
     app.add_handler(MessageHandler(filters.Regex("^📋 Отчёт за всё время$"), report_all_time))
     app.add_handler(MessageHandler(filters.Regex("^ℹ️ Помощь$"), help_cmd))
 
-    # Авто-отчёт в 21:00
+    # Авто-отчёт в 21:00 по таджикскому времени
     app.job_queue.run_daily(
         daily_auto_report,
-        time=datetime.strptime("21:00", "%H:%M").time(),
+        time=datetime.strptime("21:00", "%H:%M").time().replace(tzinfo=TZ),
     )
 
     if RENDER_EXTERNAL_URL:
