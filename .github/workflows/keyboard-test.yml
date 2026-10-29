@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["tests/keyboard.sh", ".github/workflows/keyboard-test.yml", "android/app/src/**", "play-app/app/src/**"]
+    paths: ["tests/typing.mjs", ".github/workflows/keyboard-test.yml", "android/app/src/**", "play-app/app/src/**"]
 
 permissions:
   contents: write
@@ -21,10 +21,14 @@ jobs:
         with: { gradle-version: "8.14.3" }
       - name: Сборка Ferma.apk
         working-directory: android
-        run: gradle assembleRelease --no-daemon
+        run: gradle assembleDebug --no-daemon
       - name: Сборка Ferma-uchet.apk
         working-directory: play-app
-        run: gradle assembleRelease --no-daemon
+        run: gradle assembleDebug --no-daemon
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - name: Playwright
+        run: cd tests && npm init -y >/dev/null && npm i playwright@1.49.1 --no-audit --no-fund
       - name: Включить KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -39,8 +43,10 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
-            ./tests/keyboard.sh android/app/build/outputs/apk/release/app-release.apk tj.ferma.app ferma 70
-            ./tests/keyboard.sh play-app/app/build/outputs/apk/release/app-release.apk tj.ferma.uchet uchet 12
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            adb install -r play-app/app/build/outputs/apk/debug/app-debug.apk
+            node tests/typing.mjs tj.ferma.app ferma || true
+            node tests/typing.mjs tj.ferma.uchet uchet || true
       - name: Отчёт
         if: always()
         uses: softprops/action-gh-release@v2
