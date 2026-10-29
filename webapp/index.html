@@ -205,10 +205,68 @@ function toast(msg, err = false) {
 }
 
 // ───────── вход ─────────
-function showLogin(step = 1, uid = "") {
+// ── Вход одной кнопкой через Telegram ──
+let loginPoll = null;
+function stopLoginPoll() { if (loginPoll) { clearInterval(loginPoll.timer); loginPoll = null; } }
+async function pollLogin() {
+  if (!loginPoll || loginPoll.busy) return;
+  loginPoll.busy = true;
+  try {
+    const r = await api("/api/login/poll?token=" + encodeURIComponent(loginPoll.token));
+    if (r.token) { stopLoginPoll(); finishLogin(r); return; }
+  } catch (e) {
+    stopLoginPoll(); toast(e.message, true); showLogin(0); return;
+  }
+  if (loginPoll) loginPoll.busy = false;
+}
+function finishLogin(r) {
+  S.token = r.token; S.me = r;
+  try { localStorage.setItem("ferma_token", r.token); localStorage.setItem("ferma_me", JSON.stringify(r)); } catch (e) {}
+  startApp();
+}
+function showTapLogin(waiting) {
+  const el = $("#login");
+  el.innerHTML = `
+    <div class="logo">🐄</div>
+    <h1>Ферма</h1>
+    <p class="sub">Учёт коров, расходов и склада</p>
+    ${waiting ? `
+      <div class="card" style="text-align:center;padding:22px 16px">
+        <div class="spin" style="margin:0 auto 14px"></div>
+        <b>Ждём подтверждения в Telegram</b>
+        <p class="hint" style="margin:8px 0 0">В открывшемся боте нажмите <b>«Старт»</b> (или «Запустить»), затем вернитесь сюда — вход выполнится сам.</p>
+      </div>
+      <button class="btn sec" id="tg" style="margin-top:6px">Открыть Telegram ещё раз</button>
+      <button class="link" id="cancel">Отмена</button>
+    ` : `
+      <button class="btn" id="tg" style="background:#2AABEE;font-size:17px;padding:16px">✈️ Войти через Telegram</button>
+      <p class="hint" style="text-align:center;margin-top:12px">Откроется ваш бот — нажмите в нём «Старт» и вернитесь в приложение. Ничего вводить не нужно.</p>
+      <button class="link" id="byid" style="margin-top:14px;color:var(--muted);font-weight:500">Войти по Telegram ID и коду</button>
+    `}
+    ${isAndroid() ? `<button class="link" id="server" style="color:var(--muted);font-weight:500">Адрес сервера</button>` : ""}`;
+  const openTg = () => { if (!loginPoll) return; if (isAndroid()) location.href = loginPoll.url; else window.open(loginPoll.url, "_blank"); };
+  $("#tg").onclick = async () => {
+    if (waiting && loginPoll) return openTg();
+    const btn = $("#tg"); btn.disabled = true; btn.textContent = "Подключаюсь…";
+    try {
+      const r = await api("/api/login/link", { method: "POST" });
+      stopLoginPoll();
+      loginPoll = { token: r.token, url: r.url, busy: false, timer: setInterval(pollLogin, 2000) };
+      showTapLogin(true);
+      openTg();
+    } catch (e) { toast(e.message, true); btn.disabled = false; btn.textContent = "✈️ Войти через Telegram"; }
+  };
+  if ($("#cancel")) $("#cancel").onclick = () => { stopLoginPoll(); showTapLogin(false); };
+  if ($("#byid")) $("#byid").onclick = () => showLogin(1);
+  const sv = $("#server"); if (sv) sv.onclick = () => window.Android.resetServer();
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && loginPoll) pollLogin(); });
+
+function showLogin(step = 0, uid = "") {
   $("#shell").classList.add("hidden");
   const el = $("#login");
   el.classList.remove("hidden");
+  if (step === 0) return showTapLogin(!!loginPoll);
   el.innerHTML = `
     <div class="logo">🐄</div>
     <h1>Ферма</h1>
@@ -218,6 +276,7 @@ function showLogin(step = 1, uid = "") {
         <input class="inp" id="uid" inputmode="numeric" placeholder="например: 123456789" value="${esc(uid)}"></label>
       <button class="btn" id="go">Получить код в Telegram</button>
       <p class="hint" style="text-align:center;margin-top:14px">Код придёт от вашего бота. ID можно узнать у бота @userinfobot</p>
+      <button class="link" id="tapback">← Войти через Telegram без ввода</button>
     ` : `
       <p class="hint" style="text-align:center;margin-bottom:14px">Мы отправили код в Telegram на ID <b>${esc(uid)}</b></p>
       <label class="f"><span>Код из Telegram</span>
@@ -228,6 +287,7 @@ function showLogin(step = 1, uid = "") {
     ${isAndroid() ? `<button class="link" id="server" style="margin-top:8px;color:var(--muted);font-weight:500">Адрес сервера</button>` : ""}
   `;
   const go = $("#go");
+  if ($("#tapback")) $("#tapback").onclick = () => showLogin(0);
   if (step === 1) {
     const inp = $("#uid"); inp.focus();
     inp.onkeydown = e => e.key === "Enter" && go.click();

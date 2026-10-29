@@ -346,6 +346,18 @@ def fmt_num(n):
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
     uid = update.effective_user.id
+    # Вход в мобильное приложение кнопкой: /start login_<токен>
+    if ctx.args and ctx.args[0].startswith("login_"):
+        entry = _app_logins.get(ctx.args[0][6:])
+        if entry and entry["exp"] > time.time():
+            entry["uid"] = uid
+            await update.message.reply_text(
+                "✅ Вход в приложение «Ферма» подтверждён.\nВернитесь в приложение — оно откроется само.",
+                reply_markup=main_kb(uid))
+        else:
+            await update.message.reply_text("⌛ Ссылка для входа устарела. Нажмите «Войти через Telegram» в приложении ещё раз.",
+                                            reply_markup=main_kb(uid))
+        return
     await update.message.reply_text(
         "👋 Привет! Я помогу вести учёт расходов по коровам.\n\n"
         "🐄 Купил корову → 💸 Каждый день записывай расходы → 💰 Продал — увидишь прибыль или убыток.\n\n"
@@ -1582,6 +1594,7 @@ FIXED_CATEGORIES = ["💧 Вода/Поилка", "💊 Лекарства", "�
 PRODUCT_UNITS = ["кг", "т", "л", "шт"]
 
 _login_codes = {}    # uid -> (code, expires_at, attempts)
+_app_logins = {}     # токен входа кнопкой -> {"uid": None|id, "exp": время}
 _photo_cache = {}    # file_id -> bytes (небольшой кэш в памяти)
 
 
@@ -1765,6 +1778,34 @@ def build_api_routes(tg_app: Application):
             raise ApiError("Не удалось отправить код. Откройте бота в Telegram и нажмите /start, потом попробуйте снова.")
         _login_codes[uid] = (code, time.time() + 300, 0)
         return {"ok": True}
+
+    @endpoint
+    async def login_link(request):
+        """Шаг 1 входа кнопкой: ссылка на бота с одноразовым токеном."""
+        now = time.time()
+        for k in [k for k, v in _app_logins.items() if v["exp"] < now]:
+            _app_logins.pop(k, None)
+        if len(_app_logins) > 500:
+            raise ApiError("Слишком много попыток входа, попробуйте через минуту", 429)
+        token = secrets.token_urlsafe(18)
+        _app_logins[token] = {"uid": None, "exp": now + 600}
+        username = tg_app.bot.username
+        return {"token": token, "url": f"https://t.me/{username}?start=login_{token}"}
+
+    @endpoint
+    async def login_poll(request):
+        """Шаг 2: приложение спрашивает, нажал ли пользователь «Старт» в боте."""
+        token = request.query_params.get("token", "")
+        entry = _app_logins.get(token)
+        if not entry or entry["exp"] < time.time():
+            raise ApiError("Ссылка для входа устарела. Нажмите кнопку ещё раз.", 410)
+        uid = entry["uid"]
+        if not uid:
+            return {"pending": True}
+        _app_logins.pop(token, None)
+        if uid not in get_allowed_users():
+            raise ApiError("⛔ Нет доступа. Обратитесь к владельцу: @bobojon1c", 403)
+        return {"token": make_token(uid), **me_payload(uid)}
 
     @endpoint
     async def login_verify(request):
@@ -2151,6 +2192,8 @@ def build_api_routes(tg_app: Application):
         Route("/app/{name}", webapp_file, methods=["GET"]),
         Route("/api/login/request", login_request, methods=["POST"]),
         Route("/api/login/verify", login_verify, methods=["POST"]),
+        Route("/api/login/link", login_link, methods=["POST"]),
+        Route("/api/login/poll", login_poll, methods=["GET"]),
         Route("/api/me", me, methods=["GET"]),
         Route("/api/summary", summary, methods=["GET"]),
         Route("/api/cows", cows_list, methods=["GET"]),
