@@ -100,7 +100,7 @@ textarea.inp{min-height:70px;resize:vertical}
 .list-btn::after{content:"›";color:var(--muted);font-size:22px}
 
 /* ── всплывающие окна ── */
-.sheet-wrap{position:fixed;inset:0;z-index:20;background:rgba(20,28,22,.45);display:flex;align-items:flex-end;animation:fade .18s}
+.sheet-wrap{position:fixed;top:0;left:0;right:0;bottom:0;z-index:20;background:rgba(20,28,22,.45);display:flex;align-items:flex-end;animation:fade .18s}
 .sheet{background:var(--bg);width:100%;max-height:94vh;border-radius:22px 22px 0 0;display:flex;flex-direction:column;animation:up .22s cubic-bezier(.2,.8,.3,1)}
 .sheet-head{display:flex;align-items:center;padding:14px 16px 8px;gap:8px}
 .sheet-head h3{flex:1;margin:0;font-size:18px}
@@ -110,15 +110,15 @@ textarea.inp{min-height:70px;resize:vertical}
 @keyframes fade{from{opacity:0}}
 .actions .list-btn{box-shadow:none;border:1px solid var(--line)}
 
-.toast{position:fixed;left:16px;right:16px;bottom:calc(88px + var(--safe-b));z-index:40;background:#1f2a22;color:#fff;padding:12px 14px;border-radius:12px;font-size:14.5px;animation:up .2s;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.toast{position:fixed;left:16px;right:16px;top:70px;z-index:40;background:#1f2a22;color:#fff;padding:12px 14px;border-radius:12px;font-size:14.5px;animation:up .2s;box-shadow:0 6px 20px rgba(0,0,0,.25)}
 .toast.err{background:var(--red)}
 .loading{display:flex;justify-content:center;padding:40px}
 .spin{width:30px;height:30px;border:3px solid var(--green-soft);border-top-color:var(--green);border-radius:50%;animation:sp .8s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
 
 .photos{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-.photos img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;background:var(--green-soft)}
-.viewer{position:fixed;inset:0;z-index:50;background:#000;display:grid;place-items:center}
+.photos img{width:100%;height:28vw;max-height:200px;object-fit:cover;border-radius:10px;background:var(--green-soft)}
+.viewer{position:fixed;top:0;left:0;right:0;bottom:0;z-index:50;background:#000;display:grid;place-items:center}
 .viewer img{max-width:100%;max-height:100%}
 
 .result{text-align:center;padding:8px 0 4px}
@@ -137,6 +137,11 @@ textarea.inp{min-height:70px;resize:vertical}
 .login p.sub{text-align:center;color:var(--muted);margin:0 0 26px}
 .code-inp{text-align:center;font-size:28px;letter-spacing:12px;font-weight:700}
 .link{background:none;border:0;color:var(--green);font-weight:600;padding:12px;width:100%}
+.del{border:0;background:var(--red-soft);color:var(--red);width:30px;height:30px;border-radius:50%;font-size:13px;flex:none;margin-left:6px}
+.btn.danger-solid{background:var(--red);color:#fff}
+.viewer-bar{position:absolute;left:0;right:0;bottom:0;display:flex;gap:10px;padding:14px 16px calc(14px + var(--safe-b))}
+.viewer-bar button{flex:1;border:0;border-radius:12px;padding:12px;background:rgba(255,255,255,.15);color:#fff;font-weight:600}
+input[type=date].inp{min-height:50px}
 </style>
 </head>
 <body>
@@ -165,13 +170,14 @@ const S = { token: null, me: null, tab: "home", cowsTab: "active", month: null, 
 try { S.token = localStorage.getItem("ferma_token"); S.me = JSON.parse(localStorage.getItem("ferma_me") || "null"); } catch (e) {}
 
 const $ = (s, el = document) => el.querySelector(s);
-const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = n => Math.round(Number(n) || 0).toLocaleString("ru-RU");
 const money = n => `${fmt(n)} <small>сомон</small>`;
 const signed = n => (n >= 0 ? "+" : "−") + fmt(Math.abs(n));
 const dDate = iso => iso ? new Date(iso).toLocaleDateString("ru-RU") : "—";
 const dTime = iso => iso ? new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "";
 const photoUrl = id => `/api/photo/${encodeURIComponent(id)}?t=${encodeURIComponent(S.token)}`;
+const isOwner = () => !!(S.me && S.me.is_owner);
 const isAndroid = () => typeof window.Android !== "undefined";
 const cache = {};
 
@@ -179,7 +185,7 @@ const cache = {};
 async function api(path, opts = {}) {
   const r = await fetch(path, {
     method: opts.method || (opts.body ? "POST" : "GET"),
-    headers: { "Content-Type": "application/json", ...(S.token ? { Authorization: "Bearer " + S.token } : {}) },
+    headers: Object.assign({ "Content-Type": "application/json" }, S.token ? { Authorization: "Bearer " + S.token } : {}),
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   }).catch(() => { throw new Error("Нет связи с сервером. Проверьте интернет."); });
   let data = {};
@@ -296,7 +302,7 @@ async function refresh() {
 // делегирование кликов: data-act="имя" data-id="…"
 function bindView(root) {
   root.querySelectorAll("[data-act]").forEach(el => {
-    el.onclick = e => { e.stopPropagation(); ACTIONS[el.dataset.act]?.(el.dataset.id, el); };
+    el.onclick = e => { e.stopPropagation(); const fn = ACTIONS[el.dataset.act]; if (fn) fn(el.dataset.id, el); };
   });
 }
 
@@ -304,7 +310,7 @@ function bindView(root) {
 async function renderHome() {
   const d = await api("/api/summary");
   cache.summary = d;
-  const name = S.me?.name ? esc(S.me.name.split(" (")[0]) : "";
+  const name = S.me && S.me.name ? esc(S.me.name.split(" (")[0]) : "";
   let html = `<div class="stats">
     <div class="stat big"><div class="l">Всего вложено в активных коров</div><div class="v">${money(d.invested)}</div></div>
     <div class="stat"><div class="l">Активных коров</div><div class="v">${d.cows_count}</div></div>
@@ -357,7 +363,7 @@ async function renderCows() {
 }
 
 function findCow(id) {
-  for (const k of ["active", "sold"]) { const c = (cache.cows?.[k] || []).find(x => x.id == id); if (c) return c; }
+  for (const k of ["active", "sold"]) { const c = ((cache.cows || {})[k] || []).find(x => x.id == id); if (c) return c; }
 }
 
 function openCow(id) {
@@ -386,10 +392,17 @@ function openCow(id) {
       <button class="btn wheat" data-act="sell" data-id="${c.id}">💰 Продать</button></div>` : ""}
     <h2>Расходы по категориям</h2><div class="card">${cats}</div>
     <h2>Фото (${c.photos.length})</h2>
-    ${c.photos.length ? `<div class="photos">${c.photos.map(p => `<img loading="lazy" src="${photoUrl(p)}" data-act="photo-view" data-id="${esc(p)}">`).join("")}</div>`
+    ${c.photos.length ? `<div class="photos">${c.photos.map(p => `<img loading="lazy" src="${photoUrl(p)}" data-act="photo-view" data-id="${esc(p)}" data-cow="${c.id}">`).join("")}</div>`
       : `<div class="card empty" style="padding:18px">Фото нет</div>`}
+    ${(c.history || []).length ? `<h2>История расходов</h2><div class="card">${c.history.map(e => `
+      <div class="row"><div class="grow"><div class="t">${esc(e.category)}</div><div class="s">${dDate(e.created_at)} ${dTime(e.created_at)}${e.note ? " · " + esc(e.note) : ""}</div></div>
+      <div class="amt">${fmt(e.amount)}</div>${isOwner() ? `<button class="del" data-act="exp-del" data-id="${e.id}" aria-label="Удалить">✕</button>` : ""}</div>`).join("")}</div>` : ""}
+    <div class="btns" style="margin-top:18px">
+      ${sold ? `<button class="btn sec" data-act="cow-unsell" data-id="${c.id}">↩ Отменить продажу</button>` : `<span></span>`}
+      ${isOwner() ? `<button class="btn danger" data-act="cow-del" data-id="${c.id}">🗑 Удалить корову</button>` : ""}
+    </div>
   `;
-  openSheet(`🐄 ${esc(c.name)} <span style="color:var(--muted);font-size:14px">#${c.id}</span>`, body);
+  openSheet(`🐄 ${esc(c.name)} <span style="color:var(--muted);font-size:14px">#${c.id}</span>`, body).dataset.cow = c.id;
 }
 
 // ───────── Склад ─────────
@@ -408,7 +421,10 @@ async function renderStock() {
       <div class="bar ${s.percent < 20 ? "low" : ""}"><i style="width:${Math.max(2, s.percent)}%"></i></div>
       <div class="kv" style="margin-top:8px"><span>Осталось</span><b>${fmt(s.kg_left)} из ${fmt(s.kg_total)} кг (${s.percent}%)</b></div>
       <div class="kv"><span>Использовано</span><b>${fmt(s.kg_total - s.kg_left)} кг</b></div>
-      <button class="btn sec" style="margin-top:10px;padding:11px" data-act="writeoff" data-id="${s.id}">📤 Списать этот корм</button>
+      <div class="btns" style="grid-template-columns:1fr auto">
+        <button class="btn sec" style="padding:11px" data-act="writeoff" data-id="${s.id}">📤 Списать этот корм</button>
+        ${isOwner() ? `<button class="btn danger" style="padding:11px 14px" data-act="stock-del" data-id="${s.id}" aria-label="Удалить">🗑</button>` : ""}
+      </div>
     </div>`).join("");
   return html;
 }
@@ -427,6 +443,7 @@ async function renderMore() {
     <button class="list-btn" data-act="alltime"><span class="i">📋</span><span class="grow">Отчёт за всё время<span class="s">активные коровы</span></span></button>
     <h2>Настройки</h2>
     <button class="list-btn" data-act="products"><span class="i">🗂</span><span class="grow">Товары<span class="s">категории корма</span></span></button>
+    ${me.is_owner ? `<button class="list-btn" data-act="backup"><span class="i">💾</span><span class="grow">Резервная копия сейчас<span class="s">файл придёт вам в Telegram · копия также приходит каждый день в 21:00</span></span></button>` : ""}
     ${me.is_owner ? `<button class="list-btn" data-act="users"><span class="i">👥</span><span class="grow">Пользователи</span></button>` : ""}
     ${isAndroid() ? `<button class="list-btn" data-act="server"><span class="i">🌐</span><span class="grow">Адрес сервера<span class="s">${esc(location.host)}</span></span></button>` : ""}
     <button class="list-btn" data-act="logout"><span class="i">🚪</span><span class="grow">Выйти</span></button>
@@ -449,6 +466,28 @@ function openSheet(title, body, onMount) {
 }
 function closeSheet() { const w = S.sheets.pop(); w && w.remove(); }
 function closeAllSheets() { while (S.sheets.length) closeSheet(); }
+
+// подтверждение действия (вместо системного confirm)
+function ask(text, okLabel = "Удалить", danger = true) {
+  return new Promise(resolve => {
+    const w = openSheet("Подтвердите", `<p style="font-size:16px;margin:4px 0 18px">${text}</p>
+      <div class="btns"><button class="btn sec" data-no>Отмена</button><button class="btn ${danger ? "danger-solid" : ""}" data-yes>${okLabel}</button></div>`);
+    $("[data-no]", w).onclick = () => { closeSheet(); resolve(false); };
+    $("[data-yes]", w).onclick = () => { closeSheet(); resolve(true); };
+    $(".x", w).onclick = () => { closeSheet(); resolve(false); };
+  });
+}
+
+// заново загрузить коров и открыть карточку
+async function reopenCow(id) {
+  closeAllSheets();
+  try {
+    const [a, b] = await Promise.all([api("/api/cows?status=active"), api("/api/cows?status=sold")]);
+    cache.cows = { active: a.cows, sold: b.cows };
+  } catch (e) { return toast(e.message, true); }
+  refresh();
+  openCow(id);
+}
 function replaceSheet(title, body, onMount) { closeSheet(); return openSheet(title, body, onMount); }
 
 // кнопка «Назад» Android
@@ -464,20 +503,20 @@ function formSheet({ title, fields, submit, onSubmit, intro = "" }) {
   const body = intro + fields.map(f => {
     if (f.type === "chips") return `<label class="f"><span>${f.label}</span><div class="chips" data-name="${f.name}">${f.options.map(o =>
       `<button type="button" class="chip ${o.value === f.value ? "on" : ""}" data-v="${esc(o.value)}">${esc(o.label)}</button>`).join("")}</div>${f.hint ? `<div class="hint">${f.hint}</div>` : ""}</label>`;
-    const attrs = `class="inp" name="${f.name}" placeholder="${esc(f.placeholder || "")}" ${f.num ? 'inputmode="decimal"' : ""} value="${esc(f.value ?? "")}"`;
+    const attrs = `class="inp" name="${f.name}" placeholder="${esc(f.placeholder || "")}" ${f.num ? 'inputmode="decimal"' : ""} value="${esc(f.value == null ? "" : f.value)}" ${f.type === "date" ? 'type="date"' : ""}`;
     return `<label class="f"><span>${f.label}</span>${f.type === "textarea" ? `<textarea ${attrs}></textarea>` : `<input ${attrs}>`}${f.hint ? `<div class="hint">${f.hint}</div>` : ""}</label>`;
   }).join("") + `<button class="btn" data-submit>${submit}</button>`;
   openSheet(title, body, el => {
     el.querySelectorAll(".chips").forEach(box => box.querySelectorAll(".chip").forEach(ch => ch.onclick = () => {
       box.querySelectorAll(".chip").forEach(x => x.classList.remove("on")); ch.classList.add("on");
-      const f = fields.find(x => x.name === box.dataset.name); f?.onChange?.(ch.dataset.v, el);
+      const f = fields.find(x => x.name === box.dataset.name); if (f && f.onChange) f.onChange(ch.dataset.v, el);
     }));
     const first = el.querySelector("input.inp"); if (first && !first.value) setTimeout(() => first.focus(), 250);
     const btn = el.querySelector("[data-submit]");
     btn.onclick = async () => {
       const v = {};
       el.querySelectorAll("[name]").forEach(i => v[i.name] = i.value.trim());
-      el.querySelectorAll(".chips").forEach(b => v[b.dataset.name] = b.querySelector(".chip.on")?.dataset.v ?? "");
+      el.querySelectorAll(".chips").forEach(b => { const on = b.querySelector(".chip.on"); v[b.dataset.name] = on ? on.dataset.v : ""; });
       btn.disabled = true;
       try { await onSubmit(v, el); } catch (e) { toast(e.message, true); }
       btn.disabled = false;
@@ -509,14 +548,15 @@ const ACTIONS = {
   refresh: () => refresh(),
   "cows-tab": id => { S.cowsTab = id; refresh(); },
   cow: id => openCow(id),
-  logout: () => { if (confirm("Выйти из приложения?")) logout(); },
-  server: () => window.Android?.resetServer(),
+  logout: async () => { if (await ask("Выйти из приложения?", "Выйти", false)) logout(); },
+  server: () => { if (window.Android) window.Android.resetServer(); },
 
   "cow-add": () => { closeAllSheets(); formSheet({
     title: "🐄 Новая корова",
     fields: [
       { name: "name", label: "Имя или номер", placeholder: "Бурёнка, Корова 1, Чёрная" },
       { name: "price", label: "Цена покупки (сомон)", num: true, placeholder: "например: 3500000" },
+      { name: "date", label: "Дата покупки", type: "date", value: (cache.summary && cache.summary.date) || new Date().toISOString().slice(0, 10) },
       { name: "weight", label: "Вес при покупке, кг (необязательно)", num: true },
       { name: "note", label: "Заметка (необязательно)", type: "textarea" },
     ],
@@ -524,7 +564,7 @@ const ACTIONS = {
     onSubmit: async v => {
       if (!v.name) throw new Error("Введите имя коровы");
       if (!(parseNum(v.price) > 0)) throw new Error("Введите правильную цену");
-      const r = await api("/api/cows", { body: { name: v.name, price: parseNum(v.price), weight: v.weight ? parseNum(v.weight) : 0, note: v.note } });
+      const r = await api("/api/cows", { body: { name: v.name, price: parseNum(v.price), date: v.date, weight: v.weight ? parseNum(v.weight) : 0, note: v.note } });
       closeSheet(); toast(`✅ Корова «${v.name}» добавлена`);
       S.cowsTab = "active"; switchTab("cows");
       setTimeout(() => { if (findCow(r.id)) openCow(r.id); }, 700);
@@ -616,11 +656,47 @@ const ACTIONS = {
     };
     inp.click();
   },
-  "photo-view": id => {
+  "photo-view": (id, el) => {
+    const cowId = el.dataset.cow;
     const v = document.createElement("div");
-    v.className = "viewer"; v.innerHTML = `<img src="${photoUrl(id)}">`;
-    v.onclick = () => v.remove();
+    v.className = "viewer";
+    v.innerHTML = `<img src="${photoUrl(id)}"><div class="viewer-bar"><button data-close>✕ Закрыть</button>${isOwner() ? "<button data-del>🗑 Удалить фото</button>" : ""}</div>`;
+    $("img", v).onclick = () => v.remove();
+    $("[data-close]", v).onclick = () => v.remove();
+    if ($("[data-del]", v)) $("[data-del]", v).onclick = async () => {
+      v.remove();
+      if (!await ask("Удалить это фото?")) return;
+      try { await api(`/api/cows/${cowId}/photos/delete`, { body: { photo_id: id } }); toast("Фото удалено"); reopenCow(cowId); }
+      catch (e) { toast(e.message, true); }
+    };
     document.body.appendChild(v);
+  },
+  "exp-del": async (id, el) => {
+    const cowId = el.closest(".sheet-wrap").dataset.cow;
+    if (!await ask("Удалить эту запись расхода?")) return;
+    try { await api(`/api/expenses/${id}`, { method: "DELETE" }); toast("Запись удалена"); reopenCow(cowId); }
+    catch (e) { toast(e.message, true); }
+  },
+  "cow-del": async id => {
+    const c = findCow(id);
+    if (!await ask(`Удалить корову <b>${esc(c ? c.name : "")}</b> вместе со всеми её расходами и фото? Это нельзя отменить.`)) return;
+    try { await api(`/api/cows/${id}`, { method: "DELETE" }); closeAllSheets(); refresh(); toast("Корова удалена"); }
+    catch (e) { toast(e.message, true); }
+  },
+  "cow-unsell": async id => {
+    if (!await ask("Отменить продажу? Корова снова станет активной.", "Отменить продажу", false)) return;
+    try { await api(`/api/cows/${id}/unsell`, { method: "POST" }); S.cowsTab = "active"; toast("Продажа отменена"); reopenCow(id); }
+    catch (e) { toast(e.message, true); }
+  },
+  backup: async () => {
+    toast("Делаю копию…");
+    try { const r = await api("/api/backup", { method: "POST" }); toast(`✅ Копия отправлена в Telegram: коров ${r.counts.cows}, расходов ${r.counts.expenses}`); }
+    catch (e) { toast(e.message, true); }
+  },
+  "stock-del": async id => {
+    if (!await ask("Убрать этот корм со склада? Уже записанные расходы на коров останутся.")) return;
+    try { await api(`/api/stock/${id}`, { method: "DELETE" }); toast("Убрано со склада"); refresh(); }
+    catch (e) { toast(e.message, true); }
   },
 
   "stock-buy": async () => {
@@ -657,7 +733,7 @@ const ACTIONS = {
   },
 
   writeoff: id => {
-    const s = cache.stock?.stock.find(x => x.id == id); if (!s) return;
+    const s = cache.stock && cache.stock.stock.find(x => x.id == id); if (!s) return;
     closeAllSheets();
     formSheet({
       title: `📤 Списать: ${esc(s.name)}`,
@@ -696,7 +772,7 @@ const ACTIONS = {
   },
 
   month: async (m) => {
-    const month = m || S.month || (cache.summary?.date || new Date().toISOString()).slice(0, 7);
+    const month = m || S.month || ((cache.summary && cache.summary.date) || new Date().toISOString()).slice(0, 7);
     S.month = month;
     const d = await api("/api/reports/month?month=" + month).catch(e => (toast(e.message, true), null)); if (!d) return;
     const [y, mm] = d.month.split("-").map(Number);
@@ -751,7 +827,7 @@ const ACTIONS = {
   }),
   "product-del": async (id, el) => {
     const name = el.closest(".row").querySelector(".t").textContent;
-    if (!confirm(`Удалить товар «${name}»?`)) return;
+    if (!await ask(`Удалить товар «${esc(name)}»?`)) return;
     try { await api(`/api/products/${id}`, { method: "DELETE" }); toast("✅ Удалено"); ACTIONS.products(); } catch (e) { toast(e.message, true); }
   },
 
@@ -780,7 +856,7 @@ const ACTIONS = {
   }),
   "user-del": async (id, el) => {
     const name = el.closest(".row").querySelector(".t").textContent;
-    if (!confirm(`Удалить пользователя «${name}»?`)) return;
+    if (!await ask(`Удалить пользователя «${esc(name)}»?`)) return;
     try { await api(`/api/users/${id}`, { method: "DELETE" }); toast("✅ Удалён"); ACTIONS.users(); } catch (e) { toast(e.message, true); }
   },
 };

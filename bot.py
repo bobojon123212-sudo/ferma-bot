@@ -1517,6 +1517,54 @@ async def daily_auto_report(ctx: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.warning(f"Ошибка отправки отчёта для {uid}: {e}")
 
+    # Ежедневная резервная копия всей базы — владельцу в Telegram
+    try:
+        await send_backup(ctx.bot)
+    except Exception as e:
+        logger.warning(f"Не удалось отправить резервную копию: {e}")
+
+
+# ── Резервная копия базы ──────────────────────────────────────────────────────
+BACKUP_TABLES = ["cows", "expenses", "stock", "stock_writeoffs", "users", "cow_photos", "products"]
+
+
+def make_backup() -> tuple:
+    """Полная копия всех таблиц в JSON. Только чтение — база не меняется."""
+    import json as _json
+    data = {"created_at": now_local().isoformat(), "tables": {}}
+    counts = {}
+    with db() as conn:
+        for table in BACKUP_TABLES:
+            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            rows = conn.execute(f"SELECT {', '.join(cols)} FROM {table}").fetchall()
+            data["tables"][table] = [dict(zip(cols, row)) for row in rows]
+            counts[table] = len(rows)
+    return _json.dumps(data, ensure_ascii=False, indent=1).encode("utf-8"), counts
+
+
+async def send_backup(bot, uid=None):
+    raw, counts = make_backup()
+    stamp = now_local().strftime("%Y-%m-%d_%H-%M")
+    await bot.send_document(
+        uid or OWNER_ID, document=raw, filename=f"ferma-backup-{stamp}.json",
+        caption=(f"💾 Резервная копия базы ({now_local().strftime('%d.%m.%Y %H:%M')})\n"
+                 f"🐄 Коров: {counts['cows']} · 💸 Расходов: {counts['expenses']} · "
+                 f"🏪 Склад: {counts['stock']} · 📸 Фото: {counts['cow_photos']}\n"
+                 f"Сохраните этот файл — по нему можно восстановить все данные."),
+    )
+    return counts
+
+
+async def backup_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("⛔ Только для владельца.")
+        return
+    try:
+        await send_backup(ctx.bot)
+    except Exception as e:
+        logger.exception("backup")
+        await update.message.reply_text(f"⚠️ Не удалось сделать копию: {e}")
+
 
 # ── API для мобильного приложения ─────────────────────────────────────────────
 # Приложение работает с той же базой, что и бот: всё, что записано в приложении,
@@ -1616,8 +1664,16 @@ def cows_payload(status="active"):
         ).fetchall()
         exp_rows = conn.execute("SELECT cow_id, category, SUM(amount) FROM expenses GROUP BY cow_id, category").fetchall()
         photo_rows = conn.execute("SELECT cow_id, photo_id FROM cow_photos ORDER BY added_at").fetchall()
+        hist_rows = conn.execute(
+            "SELECT e.id, e.cow_id, e.category, e.amount, e.note, e.created_at FROM expenses e "
+            "JOIN cows c ON c.id=e.cow_id WHERE c.status=? ORDER BY e.created_at DESC", (status,)
+        ).fetchall()
 
-    cats, photos = {}, {}
+    cats, photos, history = {}, {}, {}
+    for eid, cow_id, cat, amt, enote, created in hist_rows:
+        lst = history.setdefault(cow_id, [])
+        if len(lst) < 100:
+            lst.append({"id": eid, "category": cat, "amount": amt or 0, "note": enote or "", "created_at": created})
     for cow_id, cat, amt in exp_rows:
         cats.setdefault(cow_id, []).append({"category": cat, "amount": amt or 0})
     for cow_id, pid in photo_rows:
@@ -1632,7 +1688,7 @@ def cows_payload(status="active"):
         item = {
             "id": cid, "name": name, "buy_price": buy_price, "buy_weight": buy_weight or 0,
             "buy_date": buy_date, "note": note or "", "expenses": exp_total, "total_cost": total_cost,
-            "categories": cow_cats, "photos": photos.get(cid, []),
+            "categories": cow_cats, "photos": photos.get(cid, []), "history": history.get(cid, []),
         }
         if status == "active":
             item["days"] = days_owned(buy_date)
@@ -1774,10 +1830,20 @@ def build_api_routes(tg_app: Application):
         price = num(data.get("price"), "Цена покупки")
         weight = num(data.get("weight"), "Вес", required=False, positive=False)
         note = text(data.get("note"), max_len=500)
+        buy_date = now_local().isoformat()
+        if data.get("date"):
+            try:
+                d = date.fromisoformat(str(data["date"])[:10])
+            except ValueError:
+                raise ApiError("Неверная дата покупки")
+            if d > today_local():
+                raise ApiError("Дата покупки не может быть в будущем")
+            if d != today_local():
+                buy_date = datetime.combine(d, datetime.min.time()).replace(hour=12).isoformat()
         with db() as conn:
             cur = conn.execute(
                 "INSERT INTO cows (user_id, name, buy_price, buy_weight, buy_date, note) VALUES (?,?,?,?,?,?)",
-                (uid, name, price, weight, now_local().isoformat(), note)
+                (uid, name, price, weight, buy_date, note)
             )
             cow_id = cur.lastrowid
         return {"ok": True, "id": cow_id}
@@ -1811,6 +1877,57 @@ def build_api_routes(tg_app: Application):
             "expenses": exp_total, "total_cost": total_cost, "sell_price": sell_price,
             "profit": sell_price - total_cost,
         }
+
+    @endpoint
+    async def cow_unsell(request):
+        api_auth(request)
+        cow_id = int(request.path_params["cow_id"])
+        cow = active_cow(cow_id)
+        if cow[7] != "sold":
+            raise ApiError("Корова не продана")
+        with db() as conn:
+            conn.execute("UPDATE cows SET status='active', sell_price=NULL, sell_weight=NULL, sell_date=NULL, sell_note=NULL WHERE id=?", (cow_id,))
+        return {"ok": True}
+
+    @endpoint
+    async def cow_delete(request):
+        api_owner(request)   # удалять может только владелец
+        cow_id = int(request.path_params["cow_id"])
+        active_cow(cow_id)
+        with db() as conn:
+            conn.execute("DELETE FROM expenses WHERE cow_id=?", (cow_id,))
+            conn.execute("DELETE FROM cow_photos WHERE cow_id=?", (cow_id,))
+            conn.execute("DELETE FROM cows WHERE id=?", (cow_id,))
+        return {"ok": True}
+
+    @endpoint
+    async def expense_delete(request):
+        api_owner(request)   # удалять может только владелец
+        with db() as conn:
+            conn.execute("DELETE FROM expenses WHERE id=?", (int(request.path_params["expense_id"]),))
+        return {"ok": True}
+
+    @endpoint
+    async def photo_delete(request):
+        api_owner(request)   # удалять может только владелец
+        cow_id = int(request.path_params["cow_id"])
+        data = await read_json(request)
+        with db() as conn:
+            conn.execute("DELETE FROM cow_photos WHERE cow_id=? AND photo_id=?", (cow_id, str(data.get("photo_id", ""))))
+        return {"ok": True}
+
+    @endpoint
+    async def stock_delete(request):
+        api_owner(request)   # удалять может только владелец
+        with db() as conn:
+            conn.execute("DELETE FROM stock WHERE id=?", (int(request.path_params["stock_id"]),))
+        return {"ok": True}
+
+    @endpoint
+    async def backup_now(request):
+        api_owner(request)
+        counts = await send_backup(tg_app.bot)
+        return {"ok": True, "counts": counts}
 
     # ── Расходы ──
     @endpoint
@@ -2039,6 +2156,12 @@ def build_api_routes(tg_app: Application):
         Route("/api/cows", cows_list, methods=["GET"]),
         Route("/api/cows", cow_add, methods=["POST"]),
         Route("/api/cows/{cow_id:int}/sell", cow_sell, methods=["POST"]),
+        Route("/api/cows/{cow_id:int}/unsell", cow_unsell, methods=["POST"]),
+        Route("/api/cows/{cow_id:int}", cow_delete, methods=["DELETE"]),
+        Route("/api/cows/{cow_id:int}/photos/delete", photo_delete, methods=["POST"]),
+        Route("/api/expenses/{expense_id:int}", expense_delete, methods=["DELETE"]),
+        Route("/api/stock/{stock_id:int}", stock_delete, methods=["DELETE"]),
+        Route("/api/backup", backup_now, methods=["POST"]),
         Route("/api/cows/{cow_id:int}/photos", photo_add, methods=["POST"]),
         Route("/api/categories", categories, methods=["GET"]),
         Route("/api/expenses", expense_add, methods=["POST"]),
@@ -2240,6 +2363,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("backup", backup_cmd))
     app.add_handler(add_cow_conv)
     app.add_handler(exp_conv)
     app.add_handler(sell_conv)
