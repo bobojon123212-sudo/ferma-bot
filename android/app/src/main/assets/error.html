@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body{margin:0;background:#f4f1ea;color:#1f2a22;font:15px/1.45 -apple-system,Roboto,system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:28px 22px;box-sizing:border-box;text-align:center}
+  .e{font-size:56px}
+  h1{font-size:21px;margin:10px 0 6px}
+  p{color:#6b7468;margin:0 0 22px}
+  button{width:100%;max-width:320px;border:0;border-radius:14px;padding:14px;font-size:16px;font-weight:700;background:#2f5d3a;color:#fff}
+  .sec{background:transparent;color:#2f5d3a;margin-top:8px}
+</style>
+</head>
+<body>
+  <div class="e">📡</div>
+  <h1>Нет связи с сервером</h1>
+  <p>Проверьте интернет. Если сервер на Render «спал», нажмите «Повторить» через полминуты.</p>
+  <button onclick="Android.retry()">Повторить</button>
+  <button class="sec" onclick="Android.resetServer()">Изменить адрес сервера</button>
+</body>
+</html>

@@ -1,0 +1,49 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Адрес сервера можно «зашить» в APK: переменная SERVER_URL при сборке
+// (в GitHub: Settings → Secrets and variables → Actions → Variables → SERVER_URL).
+// Если не задан — приложение спросит адрес при первом запуске.
+def serverUrl = (System.getenv("SERVER_URL") ?: "").trim()
+def buildNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
+
+android {
+    namespace 'tj.ferma.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'tj.ferma.app'
+        minSdk 26
+        targetSdk 34
+        versionCode buildNumber
+        versionName "1.0.${buildNumber}"
+        resValue "string", "default_server", serverUrl
+    }
+
+    signingConfigs {
+        release {
+            storeFile file('ferma.jks')
+            storePassword 'ferma2026'
+            keyAlias 'ferma'
+            keyPassword 'ferma2026'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

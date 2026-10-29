@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🐄 Telegram бот для учёта расходов по коровам.
+🐄 Telegram бот для учёта расходов по коровам (+ API для мобильного приложения).
 Логика: Купил корову → каждый день записываешь расходы (еда, уход) → продал → видишь прибыль/убыток.
 """
 
@@ -1518,6 +1518,545 @@ async def daily_auto_report(ctx: ContextTypes.DEFAULT_TYPE):
             logger.warning(f"Ошибка отправки отчёта для {uid}: {e}")
 
 
+# ── API для мобильного приложения ─────────────────────────────────────────────
+# Приложение работает с той же базой, что и бот: всё, что записано в приложении,
+# сразу видно в боте, и наоборот. Вход — по коду, который бот присылает в Telegram.
+import hmac
+import json
+import base64
+import secrets
+import time
+from starlette.responses import JSONResponse, FileResponse
+
+APP_SECRET = (os.getenv("APP_SECRET") or hashlib.sha256(("app:" + BOT_TOKEN).encode()).hexdigest()).encode()
+WEBAPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "webapp")
+FIXED_CATEGORIES = ["💧 Вода/Поилка", "💊 Лекарства", "👨‍⚕️ Ветеринар", "🔧 Инвентарь", "🚛 Транспорт", "💰 Другое"]
+PRODUCT_UNITS = ["кг", "т", "л", "шт"]
+
+_login_codes = {}    # uid -> (code, expires_at, attempts)
+_photo_cache = {}    # file_id -> bytes (небольшой кэш в памяти)
+
+
+class ApiError(Exception):
+    def __init__(self, message, status=400):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+
+
+def make_token(uid: int) -> str:
+    sig = hmac.new(APP_SECRET, str(uid).encode(), hashlib.sha256).hexdigest()[:40]
+    return f"{uid}.{sig}"
+
+
+def token_uid(token: str):
+    try:
+        uid_str, sig = token.split(".", 1)
+        uid = int(uid_str)
+    except Exception:
+        return None
+    return uid if hmac.compare_digest(make_token(uid), f"{uid}.{sig}") else None
+
+
+def api_auth(request: Request) -> int:
+    header = request.headers.get("Authorization", "")
+    token = header[7:] if header.startswith("Bearer ") else request.query_params.get("t", "")
+    uid = token_uid(token)
+    if not uid or uid not in get_allowed_users():
+        raise ApiError("Нужно войти заново", 401)
+    return uid
+
+
+def api_owner(request: Request) -> int:
+    uid = api_auth(request)
+    if uid != OWNER_ID:
+        raise ApiError("Только для владельца", 403)
+    return uid
+
+
+async def read_json(request: Request) -> dict:
+    try:
+        data = await request.json()
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def num(value, field, required=True, positive=True):
+    if value in (None, "") and not required:
+        return 0
+    try:
+        n = float(str(value).replace(" ", "").replace(",", "."))
+    except (TypeError, ValueError):
+        raise ApiError(f"Неверное значение: {field}")
+    if positive and n <= 0:
+        raise ApiError(f"{field}: число должно быть больше нуля")
+    if n < 0:
+        raise ApiError(f"{field}: число не может быть отрицательным")
+    return n
+
+
+def text(value, field=None, max_len=200):
+    s = str(value or "").strip()[:max_len]
+    if field and not s:
+        raise ApiError(f"Заполните поле: {field}")
+    return s
+
+
+def all_categories():
+    return [p[1] for p in get_products()] + FIXED_CATEGORIES
+
+
+def cows_payload(status="active"):
+    with db() as conn:
+        cows = conn.execute(
+            "SELECT id, name, buy_price, buy_weight, buy_date, note, sell_price, sell_weight, sell_date, sell_note "
+            "FROM cows WHERE status=? ORDER BY " + ("buy_date" if status == "active" else "sell_date DESC"),
+            (status,)
+        ).fetchall()
+        exp_rows = conn.execute("SELECT cow_id, category, SUM(amount) FROM expenses GROUP BY cow_id, category").fetchall()
+        photo_rows = conn.execute("SELECT cow_id, photo_id FROM cow_photos ORDER BY added_at").fetchall()
+
+    cats, photos = {}, {}
+    for cow_id, cat, amt in exp_rows:
+        cats.setdefault(cow_id, []).append({"category": cat, "amount": amt or 0})
+    for cow_id, pid in photo_rows:
+        photos.setdefault(cow_id, []).append(pid)
+
+    result = []
+    for (cid, name, buy_price, buy_weight, buy_date, note,
+         sell_price, sell_weight, sell_date, sell_note) in cows:
+        cow_cats = sorted(cats.get(cid, []), key=lambda x: -x["amount"])
+        exp_total = sum(c["amount"] for c in cow_cats)
+        total_cost = buy_price + exp_total
+        item = {
+            "id": cid, "name": name, "buy_price": buy_price, "buy_weight": buy_weight or 0,
+            "buy_date": buy_date, "note": note or "", "expenses": exp_total, "total_cost": total_cost,
+            "categories": cow_cats, "photos": photos.get(cid, []),
+        }
+        if status == "active":
+            item["days"] = days_owned(buy_date)
+        else:
+            end = datetime.fromisoformat(sell_date).date() if sell_date else today_local()
+            item.update({
+                "sell_price": sell_price or 0, "sell_weight": sell_weight or 0, "sell_date": sell_date,
+                "sell_note": sell_note or "", "profit": (sell_price or 0) - total_cost,
+                "days": (end - datetime.fromisoformat(buy_date).date()).days + 1,
+            })
+        result.append(item)
+    return result
+
+
+def stock_payload():
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT id, feed_name, kg_total, kg_left, price_total, bought_date FROM stock WHERE kg_left > 0 ORDER BY bought_date DESC"
+        ).fetchall()
+    return [{
+        "id": sid, "name": name, "kg_total": kg_total, "kg_left": kg_left, "price_total": price,
+        "price_per_kg": price / kg_total if kg_total else 0, "bought_date": bought,
+        "percent": round(kg_left / kg_total * 100) if kg_total else 0,
+    } for sid, name, kg_total, kg_left, price, bought in rows]
+
+
+def month_report(year: int, month: int):
+    start = date(year, month, 1)
+    next_month = date(year + (month == 12), month % 12 + 1, 1)
+    rows = period_expenses(None, start.isoformat(), (next_month - timedelta(days=1)).isoformat())
+    by_cow = {}
+    for cow_name, cat, amt in rows:
+        by_cow.setdefault(cow_name, []).append({"category": cat, "amount": amt})
+    cows = [{"name": n, "total": sum(c["amount"] for c in cs), "categories": cs} for n, cs in by_cow.items()]
+    return {"month": f"{year:04d}-{month:02d}", "cows": cows, "total": sum(c["total"] for c in cows)}
+
+
+def build_api_routes(tg_app: Application):
+    """Маршруты API. tg_app нужен, чтобы отправлять коды входа и работать с фото через Telegram."""
+
+    def endpoint(fn):
+        async def wrapper(request: Request):
+            try:
+                result = await fn(request)
+                return result if isinstance(result, Response) else JSONResponse(result)
+            except ApiError as e:
+                return JSONResponse({"error": e.message}, status_code=e.status)
+            except Exception:
+                logger.exception("Ошибка API")
+                return JSONResponse({"error": "Ошибка сервера, попробуйте ещё раз"}, status_code=500)
+        return wrapper
+
+    # ── Вход ──
+    @endpoint
+    async def login_request(request):
+        data = await read_json(request)
+        try:
+            uid = int(str(data.get("user_id", "")).strip())
+        except ValueError:
+            raise ApiError("Введите Telegram ID (только цифры)")
+        if uid not in get_allowed_users():
+            raise ApiError("⛔ Этого ID нет в списке. Обратитесь к владельцу: @bobojon1c", 403)
+        prev = _login_codes.get(uid)
+        if prev and prev[1] - 270 > time.time():
+            raise ApiError("Код уже отправлен. Подождите 30 секунд.", 429)
+        code = f"{secrets.randbelow(10000):04d}"
+        try:
+            await tg_app.bot.send_message(
+                uid, f"🔐 Код для входа в приложение «Ферма»: *{code}*\n\nКод действует 5 минут. Никому его не сообщайте.",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.warning(f"Не удалось отправить код {uid}: {e}")
+            raise ApiError("Не удалось отправить код. Откройте бота в Telegram и нажмите /start, потом попробуйте снова.")
+        _login_codes[uid] = (code, time.time() + 300, 0)
+        return {"ok": True}
+
+    @endpoint
+    async def login_verify(request):
+        data = await read_json(request)
+        try:
+            uid = int(str(data.get("user_id", "")).strip())
+        except ValueError:
+            raise ApiError("Неверный ID")
+        entry = _login_codes.get(uid)
+        if not entry or entry[1] < time.time():
+            raise ApiError("Код устарел. Запросите новый.")
+        code, expires, attempts = entry
+        if str(data.get("code", "")).strip() != code:
+            if attempts >= 4:
+                _login_codes.pop(uid, None)
+                raise ApiError("Слишком много попыток. Запросите новый код.")
+            _login_codes[uid] = (code, expires, attempts + 1)
+            raise ApiError("Неверный код")
+        _login_codes.pop(uid, None)
+        if uid not in get_allowed_users():
+            raise ApiError("Нет доступа", 403)
+        return {"token": make_token(uid), **me_payload(uid)}
+
+    def me_payload(uid):
+        with db() as conn:
+            conn.execute("UPDATE users SET last_seen=? WHERE user_id=?", (now_local().isoformat(), uid))
+            row = conn.execute("SELECT name FROM users WHERE user_id=?", (uid,)).fetchone()
+        return {"user_id": uid, "name": row[0] if row else str(uid), "is_owner": uid == OWNER_ID}
+
+    @endpoint
+    async def me(request):
+        return me_payload(api_auth(request))
+
+    # ── Главная ──
+    @endpoint
+    async def summary(request):
+        api_auth(request)
+        cows = cows_payload("active")
+        today_rows = today_expenses()
+        today = today_local()
+        month = month_report(today.year, today.month)
+        return {
+            "date": today.isoformat(),
+            "cows_count": len(cows),
+            "invested": sum(c["total_cost"] for c in cows),
+            "today_total": sum(r[2] for r in today_rows),
+            "month_total": month["total"],
+            "today": [{"cow": r[0], "category": r[1], "amount": r[2], "note": r[3] or "", "time": r[4]} for r in today_rows],
+            "low_stock": [s for s in stock_payload() if s["percent"] < 20],
+        }
+
+    # ── Коровы ──
+    @endpoint
+    async def cows_list(request):
+        api_auth(request)
+        return {"cows": cows_payload(request.query_params.get("status", "active"))}
+
+    @endpoint
+    async def cow_add(request):
+        uid = api_auth(request)
+        data = await read_json(request)
+        name = text(data.get("name"), "Имя")
+        price = num(data.get("price"), "Цена покупки")
+        weight = num(data.get("weight"), "Вес", required=False, positive=False)
+        note = text(data.get("note"), max_len=500)
+        with db() as conn:
+            cur = conn.execute(
+                "INSERT INTO cows (user_id, name, buy_price, buy_weight, buy_date, note) VALUES (?,?,?,?,?,?)",
+                (uid, name, price, weight, now_local().isoformat(), note)
+            )
+            cow_id = cur.lastrowid
+        return {"ok": True, "id": cow_id}
+
+    def active_cow(cow_id):
+        cow = get_cow(cow_id)
+        if not cow:
+            raise ApiError("Корова не найдена", 404)
+        return cow
+
+    @endpoint
+    async def cow_sell(request):
+        api_auth(request)
+        cow_id = int(request.path_params["cow_id"])
+        cow = active_cow(cow_id)
+        if cow[7] != "active":
+            raise ApiError("Эта корова уже продана")
+        data = await read_json(request)
+        sell_price = num(data.get("price"), "Цена продажи")
+        weight = num(data.get("weight"), "Вес", required=False, positive=False)
+        note = text(data.get("note"), max_len=500)
+        exp_total = total_expenses(cow_id)
+        total_cost = cow[3] + exp_total
+        with db() as conn:
+            conn.execute(
+                "UPDATE cows SET status='sold', sell_price=?, sell_weight=?, sell_date=?, sell_note=? WHERE id=?",
+                (sell_price, weight, now_local().isoformat(), note, cow_id)
+            )
+        return {
+            "ok": True, "name": cow[2], "days": days_owned(cow[5]), "buy_price": cow[3],
+            "expenses": exp_total, "total_cost": total_cost, "sell_price": sell_price,
+            "profit": sell_price - total_cost,
+        }
+
+    # ── Расходы ──
+    @endpoint
+    async def categories(request):
+        api_auth(request)
+        return {"categories": all_categories()}
+
+    @endpoint
+    async def expense_add(request):
+        uid = api_auth(request)
+        data = await read_json(request)
+        category = text(data.get("category"), "Категория")
+        if category not in all_categories():
+            raise ApiError("Выберите категорию из списка")
+        amount = num(data.get("amount"), "Сумма")
+        note = text(data.get("note"), max_len=500)
+        target = data.get("cow_id")
+        if target == "all":
+            cows = get_active_cows()
+            if not cows:
+                raise ApiError("Нет активных коров")
+            targets = [(c[0], c[1]) for c in cows]
+        else:
+            try:
+                cow = active_cow(int(target))
+            except (TypeError, ValueError):
+                raise ApiError("Выберите корову")
+            if cow[7] != "active":
+                raise ApiError("Эта корова уже продана")
+            targets = [(cow[0], cow[2])]
+        share = amount / len(targets)
+        now = now_local().isoformat()
+        with db() as conn:
+            for cow_id, _ in targets:
+                conn.execute(
+                    "INSERT INTO expenses (user_id, cow_id, category, amount, note, created_at) VALUES (?,?,?,?,?,?)",
+                    (uid, cow_id, category, share, note, now)
+                )
+        return {"ok": True, "share": share, "cows": [n for _, n in targets]}
+
+    # ── Отчёты ──
+    @endpoint
+    async def report_today_api(request):
+        api_auth(request)
+        rows = today_expenses()
+        return {
+            "date": today_local().isoformat(), "total": sum(r[2] for r in rows),
+            "rows": [{"cow": r[0], "category": r[1], "amount": r[2], "note": r[3] or "", "time": r[4]} for r in rows],
+        }
+
+    @endpoint
+    async def report_month_api(request):
+        api_auth(request)
+        today = today_local()
+        try:
+            y, m = map(int, request.query_params.get("month", "").split("-"))
+            if not 1 <= m <= 12: raise ValueError
+        except ValueError:
+            y, m = today.year, today.month
+        return month_report(y, m)
+
+    # ── Склад ──
+    @endpoint
+    async def stock_list(request):
+        api_auth(request)
+        return {"stock": stock_payload(), "feed_types": FEED_TYPES}
+
+    @endpoint
+    async def stock_buy(request):
+        api_auth(request)
+        data = await read_json(request)
+        name = text(data.get("name"), "Вид корма", max_len=60)
+        kg = num(data.get("kg"), "Количество")
+        price = num(data.get("price"), "Сумма")
+        with db() as conn:
+            conn.execute(
+                "INSERT INTO stock (feed_name, kg_total, kg_left, price_total, bought_date) VALUES (?,?,?,?,?)",
+                (name, kg, kg, price, now_local().isoformat())
+            )
+        return {"ok": True, "price_per_kg": price / kg}
+
+    @endpoint
+    async def stock_writeoff(request):
+        uid = api_auth(request)
+        stock_id = int(request.path_params["stock_id"])
+        data = await read_json(request)
+        kg = num(data.get("kg"), "Количество")
+        with db() as conn:
+            stock = conn.execute("SELECT * FROM stock WHERE id=?", (stock_id,)).fetchone()
+        if not stock:
+            raise ApiError("Корм не найден", 404)
+        kg_left = stock[3]
+        if kg > kg_left + 1e-9:
+            raise ApiError(f"На складе только {fmt_num(kg_left)} кг")
+        new_left = max(kg_left - kg, 0)
+        cost = kg * (stock[4] / stock[2])
+        cows = get_active_cows()
+        share = cost / len(cows) if cows else 0
+        now = now_local().isoformat()
+        with db() as conn:
+            conn.execute("UPDATE stock SET kg_left=? WHERE id=?", (new_left, stock_id))
+            conn.execute("INSERT INTO stock_writeoffs (stock_id, kg_used, created_at) VALUES (?,?,?)", (stock_id, kg, now))
+            for cow in cows:
+                conn.execute(
+                    "INSERT INTO expenses (user_id, cow_id, category, amount, note, created_at) VALUES (?,?,?,?,?,?)",
+                    (uid, cow[0], stock[1], share, f"Склад: {fmt_num(kg)} кг", now)
+                )
+        return {
+            "ok": True, "cost": cost, "share": share, "kg_left": new_left,
+            "cows": [c[1] for c in cows], "low": new_left / stock[2] < 0.2,
+        }
+
+    # ── Товары ──
+    @endpoint
+    async def products_list(request):
+        api_auth(request)
+        return {"products": [{"id": p[0], "name": p[1], "unit": p[2]} for p in get_products()], "units": PRODUCT_UNITS}
+
+    @endpoint
+    async def product_add(request):
+        api_auth(request)
+        data = await read_json(request)
+        name = text(data.get("name"), "Наименование", max_len=60)
+        unit = data.get("unit")
+        if unit not in PRODUCT_UNITS:
+            raise ApiError("Выберите единицу: кг, т, л, шт")
+        if name in [p[1] for p in get_products()]:
+            raise ApiError(f"Товар «{name}» уже существует")
+        with db() as conn:
+            conn.execute("INSERT INTO products (name, unit) VALUES (?,?)", (name, unit))
+        return {"ok": True}
+
+    @endpoint
+    async def product_delete(request):
+        api_auth(request)
+        with db() as conn:
+            conn.execute("DELETE FROM products WHERE id=?", (int(request.path_params["product_id"]),))
+        return {"ok": True}
+
+    # ── Пользователи (только владелец) ──
+    @endpoint
+    async def users_list(request):
+        api_owner(request)
+        with db() as conn:
+            rows = conn.execute("SELECT user_id, name, added_date, last_seen FROM users ORDER BY added_date").fetchall()
+        return {"users": [{"user_id": u, "name": n, "added_date": a, "last_seen": l, "is_owner": u == OWNER_ID}
+                          for u, n, a, l in rows]}
+
+    @endpoint
+    async def user_add(request):
+        api_owner(request)
+        data = await read_json(request)
+        try:
+            uid = int(str(data.get("user_id", "")).strip())
+        except ValueError:
+            raise ApiError("Введите правильный ID (только цифры)")
+        name = text(data.get("name"), "Имя", max_len=60)
+        if uid in get_allowed_users():
+            raise ApiError("Этот пользователь уже есть в списке")
+        with db() as conn:
+            conn.execute("INSERT INTO users (user_id, name, added_date) VALUES (?,?,?)", (uid, name, now_local().isoformat()))
+        return {"ok": True}
+
+    @endpoint
+    async def user_delete(request):
+        api_owner(request)
+        uid = int(request.path_params["user_id"])
+        if uid == OWNER_ID:
+            raise ApiError("Нельзя удалить владельца")
+        with db() as conn:
+            conn.execute("DELETE FROM users WHERE user_id=?", (uid,))
+        return {"ok": True}
+
+    # ── Фото ──
+    @endpoint
+    async def photo_get(request):
+        api_auth(request)
+        file_id = request.path_params["file_id"]
+        data = _photo_cache.get(file_id)
+        if data is None:
+            tg_file = await tg_app.bot.get_file(file_id)
+            data = bytes(await tg_file.download_as_bytearray())
+            if len(_photo_cache) > 60:
+                _photo_cache.pop(next(iter(_photo_cache)))
+            _photo_cache[file_id] = data
+        return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=604800"})
+
+    @endpoint
+    async def photo_add(request):
+        uid = api_auth(request)
+        cow_id = int(request.path_params["cow_id"])
+        cow = active_cow(cow_id)
+        data = await read_json(request)
+        try:
+            raw = base64.b64decode(str(data.get("image", "")).split(",")[-1], validate=True)
+        except Exception:
+            raise ApiError("Не удалось прочитать фото")
+        if not raw or len(raw) > 9_000_000:
+            raise ApiError("Фото слишком большое")
+        # Telegram хранит фото: отправляем его в чат пользователя и берём file_id
+        msg = await tg_app.bot.send_photo(uid, photo=raw, caption=f"📸 {cow[2]} (#{cow_id}) — фото добавлено из приложения")
+        file_id = msg.photo[-1].file_id
+        with db() as conn:
+            conn.execute("INSERT INTO cow_photos (cow_id, photo_id, added_at) VALUES (?,?,?)",
+                         (cow_id, file_id, now_local().isoformat()))
+        return {"ok": True, "photo_id": file_id}
+
+    # ── Веб-интерфейс ──
+    async def webapp_page(request):
+        return FileResponse(os.path.join(WEBAPP_DIR, "index.html"), headers={"Cache-Control": "no-cache"})
+
+    async def webapp_file(request):
+        name = os.path.basename(request.path_params["name"])
+        path = os.path.join(WEBAPP_DIR, name)
+        if not os.path.isfile(path):
+            return PlainTextResponse("Not found", status_code=404)
+        return FileResponse(path)
+
+    return [
+        Route("/app", webapp_page, methods=["GET"]),
+        Route("/app/{name}", webapp_file, methods=["GET"]),
+        Route("/api/login/request", login_request, methods=["POST"]),
+        Route("/api/login/verify", login_verify, methods=["POST"]),
+        Route("/api/me", me, methods=["GET"]),
+        Route("/api/summary", summary, methods=["GET"]),
+        Route("/api/cows", cows_list, methods=["GET"]),
+        Route("/api/cows", cow_add, methods=["POST"]),
+        Route("/api/cows/{cow_id:int}/sell", cow_sell, methods=["POST"]),
+        Route("/api/cows/{cow_id:int}/photos", photo_add, methods=["POST"]),
+        Route("/api/categories", categories, methods=["GET"]),
+        Route("/api/expenses", expense_add, methods=["POST"]),
+        Route("/api/reports/today", report_today_api, methods=["GET"]),
+        Route("/api/reports/month", report_month_api, methods=["GET"]),
+        Route("/api/stock", stock_list, methods=["GET"]),
+        Route("/api/stock", stock_buy, methods=["POST"]),
+        Route("/api/stock/{stock_id:int}/writeoff", stock_writeoff, methods=["POST"]),
+        Route("/api/products", products_list, methods=["GET"]),
+        Route("/api/products", product_add, methods=["POST"]),
+        Route("/api/products/{product_id:int}", product_delete, methods=["DELETE"]),
+        Route("/api/users", users_list, methods=["GET"]),
+        Route("/api/users", user_add, methods=["POST"]),
+        Route("/api/users/{user_id:int}", user_delete, methods=["DELETE"]),
+        Route("/api/photo/{file_id:path}", photo_get, methods=["GET"]),
+    ]
+
+
 # ── Webhook-сервер (используется на Render) ───────────────────────────────────
 def build_webhook_app(app: Application) -> Starlette:
     webhook_path = f"/webhook/{WEBHOOK_SECRET}"
@@ -1536,6 +2075,7 @@ def build_webhook_app(app: Application) -> Starlette:
             "<body style='font-family:sans-serif;text-align:center;padding-top:4em'>"
             "<h1>🐄 Ferma Bot</h1>"
             "<p>Бот работает в режиме webhook ✅</p>"
+            "<p><a href='/app'>📱 Открыть приложение</a></p>"
             "</body></html>"
         )
 
@@ -1558,6 +2098,7 @@ def build_webhook_app(app: Application) -> Starlette:
         routes=[
             Route("/", health, methods=["GET"]),
             Route(webhook_path, telegram_webhook, methods=["POST"]),
+            *build_api_routes(app),
         ],
         lifespan=lifespan,
     )

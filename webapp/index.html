@@ -1,0 +1,812 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#2f5d3a">
+<title>Ферма</title>
+<style>
+:root{
+  --bg:#f4f1ea; --card:#ffffff; --ink:#1f2a22; --muted:#6b7468; --line:#e4dfd3;
+  --green:#2f5d3a; --green2:#3f7a4d; --green-soft:#e3eee5; --wheat:#d9a441; --wheat-soft:#f8eed8;
+  --red:#b83a2e; --red-soft:#f7e2df; --shadow:0 1px 2px rgba(31,42,34,.06),0 4px 14px rgba(31,42,34,.06);
+  --r:16px; --safe-b:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 -apple-system,"Segoe UI",Roboto,system-ui,sans-serif}
+body{min-height:100vh}
+button,input,select,textarea{font:inherit;color:inherit}
+.hidden{display:none!important}
+
+/* ── шапка ── */
+header{position:sticky;top:0;z-index:5;background:var(--green);color:#fff;padding:14px 16px 12px;display:flex;align-items:center;gap:10px}
+header h1{font-size:19px;margin:0;flex:1;font-weight:700;letter-spacing:.2px}
+.icon-btn{background:rgba(255,255,255,.14);border:0;color:#fff;width:38px;height:38px;border-radius:12px;font-size:18px;display:grid;place-items:center}
+.icon-btn:active{background:rgba(255,255,255,.28)}
+main{padding:14px 16px calc(96px + var(--safe-b))}
+
+/* ── нижнее меню ── */
+nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:6;background:#fff;border-top:1px solid var(--line);display:flex;padding:6px 6px calc(6px + var(--safe-b))}
+nav.tabs button{flex:1;background:none;border:0;padding:6px 0;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--muted)}
+nav.tabs button .i{font-size:21px;line-height:1;filter:grayscale(1);opacity:.65}
+nav.tabs button.on{color:var(--green);font-weight:600}
+nav.tabs button.on .i{filter:none;opacity:1}
+nav.tabs .plus{flex:0 0 64px}
+nav.tabs .plus span.i{width:52px;height:52px;margin-top:-22px;border-radius:50%;background:var(--wheat);color:#fff;display:grid;place-items:center;font-size:30px;filter:none;opacity:1;box-shadow:0 4px 12px rgba(217,164,65,.45);font-weight:300}
+
+/* ── карточки ── */
+.card{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:14px;margin-bottom:12px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.stat{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:12px 14px}
+.stat .l{font-size:12px;color:var(--muted)}
+.stat .v{font-size:20px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+.stat .v small{font-size:12px;font-weight:500;color:var(--muted)}
+.stat.big{grid-column:1/-1;background:var(--green);color:#fff}
+.stat.big .l{color:rgba(255,255,255,.75)}
+.stat.big .v{font-size:26px}
+.stat.big .v small{color:rgba(255,255,255,.75)}
+h2{font-size:15px;margin:18px 2px 8px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.row .grow{flex:1;min-width:0}
+.row .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .s{font-size:12.5px;color:var(--muted)}
+.row .amt{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.empty{text-align:center;color:var(--muted);padding:28px 12px}
+.empty .e{font-size:40px;margin-bottom:6px}
+.warn{background:var(--wheat-soft);color:#7a5714;border-radius:12px;padding:10px 12px;margin-bottom:12px;font-size:14px}
+
+/* ── коровы ── */
+.seg{display:flex;background:#e7e2d6;border-radius:12px;padding:3px;margin-bottom:12px}
+.seg button{flex:1;border:0;background:none;padding:8px;border-radius:10px;font-weight:600;color:var(--muted)}
+.seg button.on{background:#fff;color:var(--ink);box-shadow:var(--shadow)}
+.cow{display:flex;gap:12px;align-items:center}
+.thumb{width:58px;height:58px;border-radius:14px;background:var(--green-soft) center/cover no-repeat;display:grid;place-items:center;font-size:28px;flex:none}
+.cow .name{font-weight:700;font-size:16px}
+.cow .meta{font-size:12.5px;color:var(--muted)}
+.cow .sum{text-align:right}
+.cow .sum b{display:block;font-size:16px;font-variant-numeric:tabular-nums}
+.pos{color:var(--green2)} .neg{color:var(--red)}
+.pill{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:99px;background:var(--green-soft);color:var(--green);font-weight:600}
+.pill.red{background:var(--red-soft);color:var(--red)}
+
+.bar{height:8px;background:#ece7db;border-radius:99px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;background:var(--green2);border-radius:99px}
+.bar.low i{background:var(--wheat)}
+
+/* ── кнопки и формы ── */
+.btn{display:block;width:100%;border:0;border-radius:14px;padding:14px;font-weight:700;font-size:16px;background:var(--green);color:#fff}
+.btn:active{filter:brightness(.92)}
+.btn:disabled{opacity:.55}
+.btn.sec{background:var(--green-soft);color:var(--green)}
+.btn.wheat{background:var(--wheat)}
+.btn.danger{background:var(--red-soft);color:var(--red)}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.btns.three{grid-template-columns:1fr 1fr 1fr}
+.btns .btn{font-size:14px;padding:12px 8px}
+label.f{display:block;margin-bottom:14px}
+label.f>span{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600}
+.inp{width:100%;border:1.5px solid var(--line);background:#fff;border-radius:12px;padding:13px 14px;font-size:16px;outline:none}
+.inp:focus{border-color:var(--green2)}
+textarea.inp{min-height:70px;resize:vertical}
+.hint{font-size:12.5px;color:var(--muted);margin-top:5px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1.5px solid var(--line);background:#fff;border-radius:99px;padding:8px 13px;font-size:14px}
+.chip.on{border-color:var(--green);background:var(--green-soft);color:var(--green);font-weight:600}
+.list-btn{display:flex;align-items:center;gap:12px;width:100%;background:#fff;border:0;padding:14px;border-radius:14px;box-shadow:var(--shadow);margin-bottom:10px;text-align:left;font-size:15.5px}
+.list-btn .i{font-size:22px;width:30px;text-align:center}
+.list-btn .grow{flex:1}
+.list-btn .s{display:block;font-size:12.5px;color:var(--muted)}
+.list-btn::after{content:"›";color:var(--muted);font-size:22px}
+
+/* ── всплывающие окна ── */
+.sheet-wrap{position:fixed;inset:0;z-index:20;background:rgba(20,28,22,.45);display:flex;align-items:flex-end;animation:fade .18s}
+.sheet{background:var(--bg);width:100%;max-height:94vh;border-radius:22px 22px 0 0;display:flex;flex-direction:column;animation:up .22s cubic-bezier(.2,.8,.3,1)}
+.sheet-head{display:flex;align-items:center;padding:14px 16px 8px;gap:8px}
+.sheet-head h3{flex:1;margin:0;font-size:18px}
+.sheet-head .x{border:0;background:#e7e2d6;width:34px;height:34px;border-radius:50%;font-size:17px}
+.sheet-body{overflow:auto;padding:6px 16px calc(20px + var(--safe-b))}
+@keyframes up{from{transform:translateY(40px);opacity:.4}}
+@keyframes fade{from{opacity:0}}
+.actions .list-btn{box-shadow:none;border:1px solid var(--line)}
+
+.toast{position:fixed;left:16px;right:16px;bottom:calc(88px + var(--safe-b));z-index:40;background:#1f2a22;color:#fff;padding:12px 14px;border-radius:12px;font-size:14.5px;animation:up .2s;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.toast.err{background:var(--red)}
+.loading{display:flex;justify-content:center;padding:40px}
+.spin{width:30px;height:30px;border:3px solid var(--green-soft);border-top-color:var(--green);border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+.photos{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.photos img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;background:var(--green-soft)}
+.viewer{position:fixed;inset:0;z-index:50;background:#000;display:grid;place-items:center}
+.viewer img{max-width:100%;max-height:100%}
+
+.result{text-align:center;padding:8px 0 4px}
+.result .big{font-size:30px;font-weight:800;margin:6px 0}
+.kv{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14.5px}
+.kv:last-child{border-bottom:0}
+.kv b{font-variant-numeric:tabular-nums}
+.month-nav{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.month-nav b{flex:1;text-align:center;font-size:16px;text-transform:capitalize}
+.month-nav button{border:0;background:#fff;box-shadow:var(--shadow);width:40px;height:40px;border-radius:12px;font-size:18px}
+
+/* ── вход ── */
+.login{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:28px 22px}
+.login .logo{width:84px;height:84px;border-radius:24px;background:var(--green);display:grid;place-items:center;font-size:46px;margin:0 auto 14px;box-shadow:0 8px 24px rgba(47,93,58,.3)}
+.login h1{text-align:center;margin:0 0 4px;font-size:26px}
+.login p.sub{text-align:center;color:var(--muted);margin:0 0 26px}
+.code-inp{text-align:center;font-size:28px;letter-spacing:12px;font-weight:700}
+.link{background:none;border:0;color:var(--green);font-weight:600;padding:12px;width:100%}
+</style>
+</head>
+<body>
+
+<div id="login" class="login hidden"></div>
+
+<div id="shell" class="hidden">
+  <header>
+    <h1 id="title">Ферма</h1>
+    <button class="icon-btn" id="refresh" aria-label="Обновить">⟳</button>
+  </header>
+  <main id="view"></main>
+  <nav class="tabs" id="tabs">
+    <button data-tab="home"><span class="i">🏠</span>Главная</button>
+    <button data-tab="cows"><span class="i">🐄</span>Коровы</button>
+    <button class="plus" data-tab="add"><span class="i">+</span></button>
+    <button data-tab="stock"><span class="i">🏪</span>Склад</button>
+    <button data-tab="more"><span class="i">☰</span>Ещё</button>
+  </nav>
+</div>
+
+<script>
+"use strict";
+// ───────── состояние ─────────
+const S = { token: null, me: null, tab: "home", cowsTab: "active", month: null, sheets: [] };
+try { S.token = localStorage.getItem("ferma_token"); S.me = JSON.parse(localStorage.getItem("ferma_me") || "null"); } catch (e) {}
+
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = n => Math.round(Number(n) || 0).toLocaleString("ru-RU");
+const money = n => `${fmt(n)} <small>сомон</small>`;
+const signed = n => (n >= 0 ? "+" : "−") + fmt(Math.abs(n));
+const dDate = iso => iso ? new Date(iso).toLocaleDateString("ru-RU") : "—";
+const dTime = iso => iso ? new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "";
+const photoUrl = id => `/api/photo/${encodeURIComponent(id)}?t=${encodeURIComponent(S.token)}`;
+const isAndroid = () => typeof window.Android !== "undefined";
+const cache = {};
+
+// ───────── сервер ─────────
+async function api(path, opts = {}) {
+  const r = await fetch(path, {
+    method: opts.method || (opts.body ? "POST" : "GET"),
+    headers: { "Content-Type": "application/json", ...(S.token ? { Authorization: "Bearer " + S.token } : {}) },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  }).catch(() => { throw new Error("Нет связи с сервером. Проверьте интернет."); });
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (r.status === 401 && S.token) { logout(); throw new Error(data.error || "Нужно войти заново"); }
+  if (!r.ok) throw new Error(data.error || "Ошибка сервера");
+  return data;
+}
+
+function toast(msg, err = false) {
+  document.querySelectorAll(".toast").forEach(t => t.remove());
+  const t = document.createElement("div");
+  t.className = "toast" + (err ? " err" : "");
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), err ? 4200 : 2600);
+}
+
+// ───────── вход ─────────
+function showLogin(step = 1, uid = "") {
+  $("#shell").classList.add("hidden");
+  const el = $("#login");
+  el.classList.remove("hidden");
+  el.innerHTML = `
+    <div class="logo">🐄</div>
+    <h1>Ферма</h1>
+    <p class="sub">Учёт коров, расходов и склада</p>
+    ${step === 1 ? `
+      <label class="f"><span>Ваш Telegram ID</span>
+        <input class="inp" id="uid" inputmode="numeric" placeholder="например: 123456789" value="${esc(uid)}"></label>
+      <button class="btn" id="go">Получить код в Telegram</button>
+      <p class="hint" style="text-align:center;margin-top:14px">Код придёт от вашего бота. ID можно узнать у бота @userinfobot</p>
+    ` : `
+      <p class="hint" style="text-align:center;margin-bottom:14px">Мы отправили код в Telegram на ID <b>${esc(uid)}</b></p>
+      <label class="f"><span>Код из Telegram</span>
+        <input class="inp code-inp" id="code" inputmode="numeric" maxlength="4" placeholder="••••" autocomplete="one-time-code"></label>
+      <button class="btn" id="go">Войти</button>
+      <button class="link" id="back">← Другой ID</button>
+    `}
+    ${isAndroid() ? `<button class="link" id="server" style="margin-top:8px;color:var(--muted);font-weight:500">Адрес сервера</button>` : ""}
+  `;
+  const go = $("#go");
+  if (step === 1) {
+    const inp = $("#uid"); inp.focus();
+    inp.onkeydown = e => e.key === "Enter" && go.click();
+    go.onclick = async () => {
+      const v = inp.value.trim();
+      if (!/^\d{4,15}$/.test(v)) return toast("Введите ID — только цифры", true);
+      go.disabled = true; go.textContent = "Отправляю…";
+      try { await api("/api/login/request", { body: { user_id: v } }); showLogin(2, v); }
+      catch (e) { toast(e.message, true); go.disabled = false; go.textContent = "Получить код в Telegram"; }
+    };
+  } else {
+    const inp = $("#code"); inp.focus();
+    inp.oninput = () => inp.value.length === 4 && go.click();
+    $("#back").onclick = () => showLogin(1, uid);
+    go.onclick = async () => {
+      go.disabled = true;
+      try {
+        const r = await api("/api/login/verify", { body: { user_id: uid, code: inp.value.trim() } });
+        S.token = r.token; S.me = r;
+        try { localStorage.setItem("ferma_token", r.token); localStorage.setItem("ferma_me", JSON.stringify(r)); } catch (e) {}
+        startApp();
+      } catch (e) { toast(e.message, true); go.disabled = false; inp.value = ""; inp.focus(); }
+    };
+  }
+  const sv = $("#server"); if (sv) sv.onclick = () => window.Android.resetServer();
+}
+
+function logout() {
+  S.token = null; S.me = null;
+  try { localStorage.removeItem("ferma_token"); localStorage.removeItem("ferma_me"); } catch (e) {}
+  closeAllSheets();
+  showLogin();
+}
+
+// ───────── оболочка и вкладки ─────────
+function startApp() {
+  $("#login").classList.add("hidden");
+  $("#shell").classList.remove("hidden");
+  switchTab("home");
+  api("/api/me").then(me => { S.me = me; try { localStorage.setItem("ferma_me", JSON.stringify(me)); } catch (e) {} }).catch(() => {});
+}
+
+const TABS = {
+  home: { title: "Ферма", render: renderHome },
+  cows: { title: "Коровы", render: renderCows },
+  stock: { title: "Склад корма", render: renderStock },
+  more: { title: "Ещё", render: renderMore },
+};
+
+function switchTab(tab) {
+  if (tab === "add") return openAddMenu();
+  S.tab = tab;
+  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
+  $("#title").textContent = TABS[tab].title;
+  window.scrollTo(0, 0);
+  refresh();
+}
+
+async function refresh() {
+  const view = $("#view"), tab = S.tab;
+  if (!view.innerHTML.trim() || view.dataset.tab !== tab) view.innerHTML = `<div class="loading"><div class="spin"></div></div>`;
+  view.dataset.tab = tab;
+  try {
+    const html = await TABS[tab].render();
+    if (S.tab === tab) { view.innerHTML = html; bindView(view); }
+  } catch (e) {
+    if (S.tab === tab) view.innerHTML = `<div class="empty"><div class="e">📡</div>${esc(e.message)}<br><br><button class="btn sec" data-act="refresh" style="max-width:220px;margin:auto">Повторить</button></div>`;
+    bindView(view);
+  }
+}
+
+// делегирование кликов: data-act="имя" data-id="…"
+function bindView(root) {
+  root.querySelectorAll("[data-act]").forEach(el => {
+    el.onclick = e => { e.stopPropagation(); ACTIONS[el.dataset.act]?.(el.dataset.id, el); };
+  });
+}
+
+// ───────── Главная ─────────
+async function renderHome() {
+  const d = await api("/api/summary");
+  cache.summary = d;
+  const name = S.me?.name ? esc(S.me.name.split(" (")[0]) : "";
+  let html = `<div class="stats">
+    <div class="stat big"><div class="l">Всего вложено в активных коров</div><div class="v">${money(d.invested)}</div></div>
+    <div class="stat"><div class="l">Активных коров</div><div class="v">${d.cows_count}</div></div>
+    <div class="stat"><div class="l">Расход сегодня</div><div class="v">${fmt(d.today_total)}</div></div>
+    <div class="stat" style="grid-column:1/-1" data-act="month"><div class="l">Расход за этот месяц ›</div><div class="v">${money(d.month_total)}</div></div>
+  </div>`;
+  if (d.low_stock.length) html += d.low_stock.map(s => `<div class="warn">⚠️ Мало корма: <b>${esc(s.name)}</b> — осталось ${fmt(s.kg_left)} кг (${s.percent}%)</div>`).join("");
+  html += `<div class="btns" style="margin:0 0 4px"><button class="btn" data-act="expense">💸 Расход</button><button class="btn wheat" data-act="writeoff-pick">📤 Списать корм</button></div>`;
+  html += `<h2>Расходы за сегодня</h2>`;
+  if (!d.today.length) html += `<div class="card empty"><div class="e">📅</div>Сегодня расходов ещё нет${name ? `, ${name}` : ""}</div>`;
+  else html += `<div class="card">${d.today.map(r => `
+      <div class="row"><div class="grow"><div class="t">${esc(r.category)}</div>
+      <div class="s">🐄 ${esc(r.cow)} · ${dTime(r.time)}${r.note ? " · " + esc(r.note) : ""}</div></div>
+      <div class="amt">${fmt(r.amount)}</div></div>`).join("")}
+      <div class="row"><div class="grow t">Итого</div><div class="amt">${money(d.today_total)}</div></div></div>`;
+  return html;
+}
+
+// ───────── Коровы ─────────
+async function renderCows() {
+  const st = S.cowsTab;
+  const d = await api("/api/cows?status=" + st);
+  cache.cows = cache.cows || {}; cache.cows[st] = d.cows;
+  let html = `<div class="seg"><button class="${st === "active" ? "on" : ""}" data-act="cows-tab" data-id="active">Активные</button><button class="${st === "sold" ? "on" : ""}" data-act="cows-tab" data-id="sold">Проданные</button></div>`;
+  if (!d.cows.length) {
+    return html + (st === "active"
+      ? `<div class="card empty"><div class="e">🐄</div>Активных коров нет<br><br><button class="btn" data-act="cow-add" style="max-width:240px;margin:auto">Добавить корову</button></div>`
+      : `<div class="card empty"><div class="e">💰</div>Проданных коров пока нет</div>`);
+  }
+  if (st === "active") {
+    const total = d.cows.reduce((a, c) => a + c.total_cost, 0);
+    html += `<div class="stats"><div class="stat"><div class="l">Коров</div><div class="v">${d.cows.length}</div></div><div class="stat"><div class="l">Вложено</div><div class="v">${fmt(total)}</div></div></div>`;
+  } else {
+    const p = d.cows.reduce((a, c) => a + c.profit, 0);
+    html += `<div class="stats"><div class="stat"><div class="l">Продано</div><div class="v">${d.cows.length}</div></div><div class="stat"><div class="l">Итог</div><div class="v ${p >= 0 ? "pos" : "neg"}">${signed(p)}</div></div></div>`;
+  }
+  html += d.cows.map(c => `
+    <div class="card cow" data-act="cow" data-id="${c.id}">
+      <div class="thumb" ${c.photos.length ? `style="background-image:url('${photoUrl(c.photos[c.photos.length - 1])}')"` : ""}>${c.photos.length ? "" : "🐄"}</div>
+      <div class="grow" style="flex:1;min-width:0">
+        <div class="name">${esc(c.name)} <span style="color:var(--muted);font-weight:500;font-size:13px">#${c.id}</span></div>
+        <div class="meta">${st === "active" ? `${c.days} дн. в хозяйстве` : `продана ${dDate(c.sell_date)}`} · куплена за ${fmt(c.buy_price)}</div>
+      </div>
+      <div class="sum">${st === "active"
+        ? `<b>${fmt(c.total_cost)}</b><span class="meta">вложено</span>`
+        : `<b class="${c.profit >= 0 ? "pos" : "neg"}">${signed(c.profit)}</b><span class="meta">${c.profit >= 0 ? "прибыль" : "убыток"}</span>`}</div>
+    </div>`).join("");
+  if (st === "active") html += `<button class="btn sec" data-act="cow-add">+ Добавить корову</button>`;
+  return html;
+}
+
+function findCow(id) {
+  for (const k of ["active", "sold"]) { const c = (cache.cows?.[k] || []).find(x => x.id == id); if (c) return c; }
+}
+
+function openCow(id) {
+  const c = findCow(id); if (!c) return;
+  const sold = !!c.sell_date;
+  const cats = c.categories.length
+    ? c.categories.map(x => `<div class="kv"><span>${esc(x.category)}</span><b>${fmt(x.amount)}</b></div>`).join("")
+    : `<div class="hint">Расходов ещё нет</div>`;
+  const body = `
+    <div class="card">
+      <div class="kv"><span>📅 Дата покупки</span><b>${dDate(c.buy_date)}</b></div>
+      <div class="kv"><span>⏱ Дней в хозяйстве</span><b>${c.days}</b></div>
+      <div class="kv"><span>💰 Цена покупки</span><b>${fmt(c.buy_price)}</b></div>
+      ${c.buy_weight ? `<div class="kv"><span>⚖️ Вес при покупке</span><b>${fmt(c.buy_weight)} кг</b></div>` : ""}
+      <div class="kv"><span>💸 Корм и уход</span><b>${fmt(c.expenses)}</b></div>
+      <div class="kv"><span>📊 Итого вложено</span><b>${fmt(c.total_cost)} сомон</b></div>
+      ${sold ? `
+        <div class="kv"><span>💵 Цена продажи</span><b>${fmt(c.sell_price)}</b></div>
+        ${c.sell_weight ? `<div class="kv"><span>⚖️ Вес при продаже</span><b>${fmt(c.sell_weight)} кг</b></div>` : ""}
+        <div class="kv"><span>${c.profit >= 0 ? "🟢 Прибыль" : "🔴 Убыток"}</span><b class="${c.profit >= 0 ? "pos" : "neg"}">${signed(c.profit)} сомон</b></div>` : ""}
+      ${c.note ? `<div class="hint" style="margin-top:8px">📝 ${esc(c.note)}</div>` : ""}
+    </div>
+    ${!sold ? `<div class="btns three" style="margin:0 0 12px">
+      <button class="btn" data-act="expense" data-id="${c.id}">💸 Расход</button>
+      <button class="btn sec" data-act="photo-add" data-id="${c.id}">📸 Фото</button>
+      <button class="btn wheat" data-act="sell" data-id="${c.id}">💰 Продать</button></div>` : ""}
+    <h2>Расходы по категориям</h2><div class="card">${cats}</div>
+    <h2>Фото (${c.photos.length})</h2>
+    ${c.photos.length ? `<div class="photos">${c.photos.map(p => `<img loading="lazy" src="${photoUrl(p)}" data-act="photo-view" data-id="${esc(p)}">`).join("")}</div>`
+      : `<div class="card empty" style="padding:18px">Фото нет</div>`}
+  `;
+  openSheet(`🐄 ${esc(c.name)} <span style="color:var(--muted);font-size:14px">#${c.id}</span>`, body);
+}
+
+// ───────── Склад ─────────
+async function renderStock() {
+  const d = await api("/api/stock");
+  cache.stock = d;
+  let html = `<div class="btns" style="margin:0 0 12px"><button class="btn" data-act="stock-buy">📦 Купить корм</button><button class="btn wheat" data-act="writeoff-pick">📤 Списать</button></div>`;
+  if (!d.stock.length) return html + `<div class="card empty"><div class="e">🏪</div>Склад пустой</div>`;
+  html += d.stock.map(s => `
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="flex:1"><div style="font-weight:700;font-size:16px">${esc(s.name)}</div>
+        <div class="hint" style="margin:0">куплен ${dDate(s.bought_date)} · ${fmt(s.price_per_kg)} сомон/кг</div></div>
+        ${s.percent < 20 ? `<span class="pill red">мало</span>` : ""}
+      </div>
+      <div class="bar ${s.percent < 20 ? "low" : ""}"><i style="width:${Math.max(2, s.percent)}%"></i></div>
+      <div class="kv" style="margin-top:8px"><span>Осталось</span><b>${fmt(s.kg_left)} из ${fmt(s.kg_total)} кг (${s.percent}%)</b></div>
+      <div class="kv"><span>Использовано</span><b>${fmt(s.kg_total - s.kg_left)} кг</b></div>
+      <button class="btn sec" style="margin-top:10px;padding:11px" data-act="writeoff" data-id="${s.id}">📤 Списать этот корм</button>
+    </div>`).join("");
+  return html;
+}
+
+// ───────── Ещё ─────────
+async function renderMore() {
+  const me = S.me || {};
+  return `
+    <div class="card" style="display:flex;gap:12px;align-items:center">
+      <div class="thumb" style="width:48px;height:48px;font-size:24px">👤</div>
+      <div><b>${esc(me.name || "")}</b>${me.is_owner ? " 👑" : ""}<div class="hint" style="margin:0">ID: ${esc(me.user_id || "")}</div></div>
+    </div>
+    <h2>Отчёты</h2>
+    <button class="list-btn" data-act="today"><span class="i">📅</span><span class="grow">Отчёт за сегодня</span></button>
+    <button class="list-btn" data-act="month"><span class="i">📆</span><span class="grow">Отчёт за месяц<span class="s">можно листать месяцы</span></span></button>
+    <button class="list-btn" data-act="alltime"><span class="i">📋</span><span class="grow">Отчёт за всё время<span class="s">активные коровы</span></span></button>
+    <h2>Настройки</h2>
+    <button class="list-btn" data-act="products"><span class="i">🗂</span><span class="grow">Товары<span class="s">категории корма</span></span></button>
+    ${me.is_owner ? `<button class="list-btn" data-act="users"><span class="i">👥</span><span class="grow">Пользователи</span></button>` : ""}
+    ${isAndroid() ? `<button class="list-btn" data-act="server"><span class="i">🌐</span><span class="grow">Адрес сервера<span class="s">${esc(location.host)}</span></span></button>` : ""}
+    <button class="list-btn" data-act="logout"><span class="i">🚪</span><span class="grow">Выйти</span></button>
+    <p class="hint" style="text-align:center;margin-top:16px">Данные общие с Telegram-ботом.<br>Ежедневный отчёт приходит в боте в 21:00.</p>
+  `;
+}
+
+// ───────── всплывающие окна ─────────
+function openSheet(title, body, onMount) {
+  const wrap = document.createElement("div");
+  wrap.className = "sheet-wrap";
+  wrap.innerHTML = `<div class="sheet"><div class="sheet-head"><h3>${title}</h3><button class="x" aria-label="Закрыть">✕</button></div><div class="sheet-body">${body}</div></div>`;
+  wrap.onclick = e => { if (e.target === wrap) closeSheet(); };
+  $(".x", wrap).onclick = closeSheet;
+  document.body.appendChild(wrap);
+  S.sheets.push(wrap);
+  bindView(wrap);
+  onMount && onMount($(".sheet-body", wrap), wrap);
+  return wrap;
+}
+function closeSheet() { const w = S.sheets.pop(); w && w.remove(); }
+function closeAllSheets() { while (S.sheets.length) closeSheet(); }
+function replaceSheet(title, body, onMount) { closeSheet(); return openSheet(title, body, onMount); }
+
+// кнопка «Назад» Android
+window.appBack = function () {
+  if ($(".viewer")) { $(".viewer").remove(); return true; }
+  if (S.sheets.length) { closeSheet(); return true; }
+  if (S.tab !== "home" && !$("#shell").classList.contains("hidden")) { switchTab("home"); return true; }
+  return false;
+};
+
+// простая форма: поля → объект
+function formSheet({ title, fields, submit, onSubmit, intro = "" }) {
+  const body = intro + fields.map(f => {
+    if (f.type === "chips") return `<label class="f"><span>${f.label}</span><div class="chips" data-name="${f.name}">${f.options.map(o =>
+      `<button type="button" class="chip ${o.value === f.value ? "on" : ""}" data-v="${esc(o.value)}">${esc(o.label)}</button>`).join("")}</div>${f.hint ? `<div class="hint">${f.hint}</div>` : ""}</label>`;
+    const attrs = `class="inp" name="${f.name}" placeholder="${esc(f.placeholder || "")}" ${f.num ? 'inputmode="decimal"' : ""} value="${esc(f.value ?? "")}"`;
+    return `<label class="f"><span>${f.label}</span>${f.type === "textarea" ? `<textarea ${attrs}></textarea>` : `<input ${attrs}>`}${f.hint ? `<div class="hint">${f.hint}</div>` : ""}</label>`;
+  }).join("") + `<button class="btn" data-submit>${submit}</button>`;
+  openSheet(title, body, el => {
+    el.querySelectorAll(".chips").forEach(box => box.querySelectorAll(".chip").forEach(ch => ch.onclick = () => {
+      box.querySelectorAll(".chip").forEach(x => x.classList.remove("on")); ch.classList.add("on");
+      const f = fields.find(x => x.name === box.dataset.name); f?.onChange?.(ch.dataset.v, el);
+    }));
+    const first = el.querySelector("input.inp"); if (first && !first.value) setTimeout(() => first.focus(), 250);
+    const btn = el.querySelector("[data-submit]");
+    btn.onclick = async () => {
+      const v = {};
+      el.querySelectorAll("[name]").forEach(i => v[i.name] = i.value.trim());
+      el.querySelectorAll(".chips").forEach(b => v[b.dataset.name] = b.querySelector(".chip.on")?.dataset.v ?? "");
+      btn.disabled = true;
+      try { await onSubmit(v, el); } catch (e) { toast(e.message, true); }
+      btn.disabled = false;
+    };
+  });
+}
+const parseNum = s => Number(String(s || "").replace(/\s/g, "").replace(",", "."));
+
+// ───────── меню «+» ─────────
+function openAddMenu() {
+  openSheet("Что записать?", `<div class="actions">
+    <button class="list-btn" data-act="expense"><span class="i">💸</span><span class="grow">Записать расход<span class="s">на одну корову</span></span></button>
+    <button class="list-btn" data-act="expense" data-id="all"><span class="i">🐮</span><span class="grow">Расход на всех коров<span class="s">сумма делится поровну</span></span></button>
+    <button class="list-btn" data-act="writeoff-pick"><span class="i">📤</span><span class="grow">Списать корм со склада</span></button>
+    <button class="list-btn" data-act="stock-buy"><span class="i">📦</span><span class="grow">Купить корм на склад</span></button>
+    <button class="list-btn" data-act="cow-add"><span class="i">🐄</span><span class="grow">Добавить корову</span></button>
+    <button class="list-btn" data-act="sell"><span class="i">💰</span><span class="grow">Продать корову</span></button>
+  </div>`);
+}
+
+async function activeCows() {
+  const d = await api("/api/cows?status=active");
+  cache.cows = cache.cows || {}; cache.cows.active = d.cows;
+  return d.cows;
+}
+
+// ───────── действия ─────────
+const ACTIONS = {
+  refresh: () => refresh(),
+  "cows-tab": id => { S.cowsTab = id; refresh(); },
+  cow: id => openCow(id),
+  logout: () => { if (confirm("Выйти из приложения?")) logout(); },
+  server: () => window.Android?.resetServer(),
+
+  "cow-add": () => { closeAllSheets(); formSheet({
+    title: "🐄 Новая корова",
+    fields: [
+      { name: "name", label: "Имя или номер", placeholder: "Бурёнка, Корова 1, Чёрная" },
+      { name: "price", label: "Цена покупки (сомон)", num: true, placeholder: "например: 3500000" },
+      { name: "weight", label: "Вес при покупке, кг (необязательно)", num: true },
+      { name: "note", label: "Заметка (необязательно)", type: "textarea" },
+    ],
+    submit: "Добавить корову",
+    onSubmit: async v => {
+      if (!v.name) throw new Error("Введите имя коровы");
+      if (!(parseNum(v.price) > 0)) throw new Error("Введите правильную цену");
+      const r = await api("/api/cows", { body: { name: v.name, price: parseNum(v.price), weight: v.weight ? parseNum(v.weight) : 0, note: v.note } });
+      closeSheet(); toast(`✅ Корова «${v.name}» добавлена`);
+      S.cowsTab = "active"; switchTab("cows");
+      setTimeout(() => { if (findCow(r.id)) openCow(r.id); }, 700);
+    },
+  }); },
+
+  expense: async (cowId) => {
+    closeAllSheets();
+    const [cows, cats] = await Promise.all([activeCows(), api("/api/categories")]).catch(e => (toast(e.message, true), []));
+    if (!cows) return;
+    if (!cows.length) return toast("Нет активных коров. Сначала добавьте корову.", true);
+    const all = cowId === "all";
+    const fields = [];
+    if (!all) fields.push({ type: "chips", name: "cow", label: "Корова", value: cowId ? String(cowId) : (cows.length === 1 ? String(cows[0].id) : ""),
+      options: cows.map(c => ({ value: String(c.id), label: `🐄 ${c.name}` })) });
+    fields.push(
+      { type: "chips", name: "category", label: "Категория", options: cats.categories.map(c => ({ value: c, label: c })) },
+      { name: "amount", label: all ? "Общая сумма (сомон)" : "Сумма (сомон)", num: true, placeholder: "например: 50000",
+        hint: all ? `Делится поровну на ${cows.length} коров(ы)` : "" },
+      { name: "note", label: "Заметка (необязательно)" },
+    );
+    formSheet({
+      title: all ? "💸 Расход на всех коров" : "💸 Записать расход",
+      intro: all ? `<div class="warn" style="background:var(--green-soft);color:var(--green)">Коровы: ${cows.map(c => esc(c.name)).join(", ")}</div>` : "",
+      fields, submit: "Записать расход",
+      onSubmit: async v => {
+        if (!all && !v.cow) throw new Error("Выберите корову");
+        if (!v.category) throw new Error("Выберите категорию");
+        if (!(parseNum(v.amount) > 0)) throw new Error("Введите правильную сумму");
+        const r = await api("/api/expenses", { body: { cow_id: all ? "all" : Number(v.cow), category: v.category, amount: parseNum(v.amount), note: v.note } });
+        closeSheet();
+        toast(all ? `✅ Записано: по ${fmt(r.share)} сомон на ${r.cows.length} коров` : `✅ Расход записан: ${r.cows[0]} — ${fmt(r.share)} сомон`);
+        refresh();
+      },
+    });
+  },
+
+  sell: async (cowId) => {
+    closeAllSheets();
+    const cows = await activeCows().catch(e => (toast(e.message, true), null));
+    if (!cows) return;
+    if (!cows.length) return toast("Нет активных коров", true);
+    const fields = [];
+    if (!cowId) fields.push({ type: "chips", name: "cow", label: "Какую корову продаёте?", options: cows.map(c => ({ value: String(c.id), label: `🐄 ${c.name}` })) });
+    const c0 = cowId && cows.find(c => c.id == cowId);
+    fields.push(
+      { name: "price", label: "Цена продажи (сомон)", num: true },
+      { name: "weight", label: "Вес при продаже, кг (необязательно)", num: true },
+      { name: "note", label: "Заметка (необязательно)" },
+    );
+    formSheet({
+      title: c0 ? `💰 Продать: ${esc(c0.name)}` : "💰 Продажа коровы",
+      intro: c0 ? `<div class="card"><div class="kv"><span>Итого вложено</span><b>${fmt(c0.total_cost)} сомон</b></div></div>` : "",
+      fields, submit: "Продать",
+      onSubmit: async v => {
+        const id = cowId || v.cow;
+        if (!id) throw new Error("Выберите корову");
+        if (!(parseNum(v.price) > 0)) throw new Error("Введите правильную цену");
+        const r = await api(`/api/cows/${id}/sell`, { body: { price: parseNum(v.price), weight: v.weight ? parseNum(v.weight) : 0, note: v.note } });
+        const pos = r.profit >= 0;
+        replaceSheet(`💰 ${esc(r.name)} продана!`, `
+          <div class="card result"><div>${pos ? "🟢 Прибыль" : "🔴 Убыток"}</div>
+          <div class="big ${pos ? "pos" : "neg"}">${signed(r.profit)} сомон</div></div>
+          <div class="card">
+            <div class="kv"><span>📅 Дней в хозяйстве</span><b>${r.days}</b></div>
+            <div class="kv"><span>Цена покупки</span><b>${fmt(r.buy_price)}</b></div>
+            <div class="kv"><span>Корм и уход</span><b>${fmt(r.expenses)}</b></div>
+            <div class="kv"><span>Итого потрачено</span><b>${fmt(r.total_cost)}</b></div>
+            <div class="kv"><span>💵 Цена продажи</span><b>${fmt(r.sell_price)}</b></div>
+          </div><button class="btn" data-act="close">Готово</button>`);
+        refresh();
+      },
+    });
+  },
+  close: () => closeSheet(),
+
+  "photo-add": cowId => {
+    const inp = document.createElement("input");
+    inp.type = "file"; inp.accept = "image/*";
+    inp.onchange = async () => {
+      const file = inp.files[0]; if (!file) return;
+      toast("Загружаю фото…");
+      try {
+        const image = await shrinkImage(file);
+        await api(`/api/cows/${cowId}/photos`, { body: { image } });
+        toast("✅ Фото добавлено");
+        closeAllSheets(); await refresh(); await activeCows(); openCow(cowId);
+      } catch (e) { toast(e.message, true); }
+    };
+    inp.click();
+  },
+  "photo-view": id => {
+    const v = document.createElement("div");
+    v.className = "viewer"; v.innerHTML = `<img src="${photoUrl(id)}">`;
+    v.onclick = () => v.remove();
+    document.body.appendChild(v);
+  },
+
+  "stock-buy": async () => {
+    closeAllSheets();
+    const d = cache.stock || await api("/api/stock").catch(() => ({ feed_types: ["🌾 Отруб", "🌽 Кунчора", "🌿 Ках", "🌿 Другой корм"] }));
+    formSheet({
+      title: "📦 Купить корм",
+      fields: [
+        { type: "chips", name: "name", label: "Вид корма", options: d.feed_types.map(f => ({ value: f, label: f })) },
+        { name: "kg", label: "Сколько килограмм купили?", num: true, placeholder: "например: 1000" },
+        { name: "price", label: "Сколько заплатили за всё (сомон)?", num: true, placeholder: "например: 500000" },
+      ],
+      submit: "Добавить на склад",
+      onSubmit: async v => {
+        if (!v.name) throw new Error("Выберите вид корма");
+        if (!(parseNum(v.kg) > 0)) throw new Error("Введите количество");
+        if (!(parseNum(v.price) > 0)) throw new Error("Введите сумму");
+        const r = await api("/api/stock", { body: { name: v.name, kg: parseNum(v.kg), price: parseNum(v.price) } });
+        closeSheet(); toast(`✅ Корм добавлен. Цена за кг: ${fmt(r.price_per_kg)} сомон`);
+        switchTab("stock");
+      },
+    });
+  },
+
+  "writeoff-pick": async () => {
+    closeAllSheets();
+    const d = await api("/api/stock").catch(e => (toast(e.message, true), null));
+    if (!d) return;
+    cache.stock = d;
+    if (!d.stock.length) return toast("Склад пустой. Сначала купите корм.", true);
+    if (d.stock.length === 1) return ACTIONS.writeoff(d.stock[0].id);
+    openSheet("📤 Какой корм списываем?", `<div class="actions">${d.stock.map(s =>
+      `<button class="list-btn" data-act="writeoff" data-id="${s.id}"><span class="grow">${esc(s.name)}<span class="s">осталось ${fmt(s.kg_left)} кг · куплен ${dDate(s.bought_date)}</span></span></button>`).join("")}</div>`);
+  },
+
+  writeoff: id => {
+    const s = cache.stock?.stock.find(x => x.id == id); if (!s) return;
+    closeAllSheets();
+    formSheet({
+      title: `📤 Списать: ${esc(s.name)}`,
+      intro: `<div class="card"><div class="kv"><span>На складе</span><b>${fmt(s.kg_left)} кг</b></div><div class="kv"><span>Цена за кг</span><b>${fmt(s.price_per_kg)} сомон</b></div></div>`,
+      fields: [{ name: "kg", label: "Сколько кг списать?", num: true, placeholder: "например: 5",
+        hint: "Стоимость запишется как расход, поровну на всех активных коров" }],
+      submit: "Списать",
+      onSubmit: async v => {
+        const kg = parseNum(v.kg);
+        if (!(kg > 0)) throw new Error("Введите количество");
+        if (kg > s.kg_left + 1e-9) throw new Error(`На складе только ${fmt(s.kg_left)} кг`);
+        const r = await api(`/api/stock/${id}/writeoff`, { body: { kg } });
+        replaceSheet("✅ Списано со склада", `
+          <div class="card">
+            <div class="kv"><span>${esc(s.name)}</span><b>${fmt(kg)} кг</b></div>
+            <div class="kv"><span>Общая стоимость</span><b>${fmt(r.cost)} сомон</b></div>
+            <div class="kv"><span>Осталось на складе</span><b>${fmt(r.kg_left)} кг</b></div>
+          </div>
+          ${r.low ? `<div class="warn">⚠️ Осталось мало корма!</div>` : ""}
+          <h2>Расход на коров (${fmt(r.share)} каждой)</h2>
+          <div class="card">${r.cows.length ? r.cows.map(n => `<div class="kv"><span>🐄 ${esc(n)}</span><b>${fmt(r.share)}</b></div>`).join("") : `<div class="hint">Нет активных коров — расход не записан</div>`}</div>
+          <button class="btn" data-act="close">Готово</button>`);
+        refresh();
+      },
+    });
+  },
+
+  today: async () => {
+    const d = await api("/api/reports/today").catch(e => (toast(e.message, true), null)); if (!d) return;
+    const groups = {};
+    d.rows.forEach(r => (groups[r.cow] = groups[r.cow] || []).push(r));
+    openSheet(`📅 Сегодня, ${dDate(d.date)}`, d.rows.length ? Object.entries(groups).map(([cow, rows]) =>
+      `<h2>🐄 ${esc(cow)}</h2><div class="card">${rows.map(r => `<div class="row"><div class="grow"><div class="t">${esc(r.category)}</div><div class="s">${dTime(r.time)}${r.note ? " · " + esc(r.note) : ""}</div></div><div class="amt">${fmt(r.amount)}</div></div>`).join("")}</div>`).join("")
+      + `<div class="card"><div class="kv"><span><b>Итого за сегодня</b></span><b>${fmt(d.total)} сомон</b></div></div>`
+      : `<div class="card empty"><div class="e">📅</div>Сегодня расходов нет</div>`);
+  },
+
+  month: async (m) => {
+    const month = m || S.month || (cache.summary?.date || new Date().toISOString()).slice(0, 7);
+    S.month = month;
+    const d = await api("/api/reports/month?month=" + month).catch(e => (toast(e.message, true), null)); if (!d) return;
+    const [y, mm] = d.month.split("-").map(Number);
+    const shift = k => { const dt = new Date(y, mm - 1 + k, 1); return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`; };
+    const label = new Date(y, mm - 1, 1).toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
+    const body = `<div class="month-nav"><button data-act="month-go" data-id="${shift(-1)}">‹</button><b>${label}</b><button data-act="month-go" data-id="${shift(1)}">›</button></div>
+      ${d.cows.length ? d.cows.map(c => `<h2>🐄 ${esc(c.name)}</h2><div class="card">${c.categories.map(x => `<div class="kv"><span>${esc(x.category)}</span><b>${fmt(x.amount)}</b></div>`).join("")}
+        <div class="kv"><span><b>Итого</b></span><b>${fmt(c.total)} сомон</b></div></div>`).join("")
+        + `<div class="card" style="background:var(--green);color:#fff"><div class="kv" style="border:0"><span>Всего за месяц</span><b>${fmt(d.total)} сомон</b></div></div>`
+        : `<div class="card empty"><div class="e">📆</div>В этом месяце расходов нет</div>`}`;
+    if (S.sheets.length && S.sheets[S.sheets.length - 1].dataset.kind === "month") replaceSheet("📆 Отчёт за месяц", body).dataset.kind = "month";
+    else openSheet("📆 Отчёт за месяц", body).dataset.kind = "month";
+  },
+  "month-go": m => ACTIONS.month(m),
+
+  alltime: async () => {
+    const cows = await activeCows().catch(e => (toast(e.message, true), null)); if (!cows) return;
+    const total = cows.reduce((a, c) => a + c.total_cost, 0);
+    openSheet("📋 За всё время", cows.length ? cows.map(c => `
+      <h2>🐄 ${esc(c.name)} #${c.id}</h2><div class="card">
+        <div class="kv"><span>Куплена</span><b>${dDate(c.buy_date)} (${c.days} дн.)</b></div>
+        <div class="kv"><span>Цена покупки</span><b>${fmt(c.buy_price)}${c.buy_weight ? `, ${fmt(c.buy_weight)} кг` : ""}</b></div>
+        ${c.categories.map(x => `<div class="kv"><span>&nbsp;&nbsp;${esc(x.category)}</span><b>${fmt(x.amount)}</b></div>`).join("")}
+        <div class="kv"><span>Корм и уход</span><b>${fmt(c.expenses)}</b></div>
+        <div class="kv"><span><b>Итого вложено</b></span><b>${fmt(c.total_cost)} сомон</b></div></div>`).join("")
+      + `<div class="card" style="background:var(--green);color:#fff"><div class="kv" style="border:0"><span>Всего во всех коров</span><b>${fmt(total)} сомон</b></div></div>`
+      : `<div class="card empty">Активных коров нет</div>`);
+  },
+
+  products: async () => {
+    const d = await api("/api/products").catch(e => (toast(e.message, true), null)); if (!d) return;
+    const body = `<div class="card">${d.products.map(p => `<div class="row"><div class="grow"><div class="t">${esc(p.name)}</div><div class="s">${esc(p.unit)}</div></div>
+      <button class="chip" data-act="product-del" data-id="${p.id}" style="color:var(--red)">Удалить</button></div>`).join("") || `<div class="empty">Товаров нет</div>`}</div>
+      <button class="btn" data-act="product-add">+ Добавить товар</button>
+      <p class="hint">Товары появляются как категории при записи расхода.</p>`;
+    if (S.sheets.length && S.sheets[S.sheets.length - 1].dataset.kind === "products") replaceSheet("🗂 Товары", body).dataset.kind = "products";
+    else openSheet("🗂 Товары", body).dataset.kind = "products";
+    cache.units = d.units;
+  },
+  "product-add": () => formSheet({
+    title: "➕ Новый товар",
+    fields: [
+      { name: "name", label: "Наименование", placeholder: "Ячмень, Силос, Комбикорм" },
+      { type: "chips", name: "unit", label: "Единица измерения", value: "кг", options: (cache.units || ["кг", "т", "л", "шт"]).map(u => ({ value: u, label: u })) },
+    ],
+    submit: "Добавить",
+    onSubmit: async v => {
+      if (!v.name) throw new Error("Введите наименование");
+      await api("/api/products", { body: v });
+      closeSheet(); toast(`✅ Товар «${v.name}» добавлен`); ACTIONS.products();
+    },
+  }),
+  "product-del": async (id, el) => {
+    const name = el.closest(".row").querySelector(".t").textContent;
+    if (!confirm(`Удалить товар «${name}»?`)) return;
+    try { await api(`/api/products/${id}`, { method: "DELETE" }); toast("✅ Удалено"); ACTIONS.products(); } catch (e) { toast(e.message, true); }
+  },
+
+  users: async () => {
+    const d = await api("/api/users").catch(e => (toast(e.message, true), null)); if (!d) return;
+    const body = `<div class="card">${d.users.map(u => `<div class="row"><div class="grow"><div class="t">${esc(u.name)}${u.is_owner ? " 👑" : ""}</div>
+      <div class="s">ID ${u.user_id} · был(а): ${u.last_seen ? dDate(u.last_seen) + " " + dTime(u.last_seen) : "ещё не заходил"}</div></div>
+      ${u.is_owner ? "" : `<button class="chip" data-act="user-del" data-id="${u.user_id}" style="color:var(--red)">Удалить</button>`}</div>`).join("")}</div>
+      <button class="btn" data-act="user-add">+ Добавить пользователя</button>`;
+    if (S.sheets.length && S.sheets[S.sheets.length - 1].dataset.kind === "users") replaceSheet("👥 Пользователи", body).dataset.kind = "users";
+    else openSheet("👥 Пользователи", body).dataset.kind = "users";
+  },
+  "user-add": () => formSheet({
+    title: "➕ Новый пользователь",
+    fields: [
+      { name: "user_id", label: "Telegram ID", num: true, placeholder: "например: 123456789" },
+      { name: "name", label: "Имя", placeholder: "например: Алишер" },
+    ],
+    submit: "Добавить",
+    onSubmit: async v => {
+      if (!/^\d+$/.test(v.user_id)) throw new Error("ID — только цифры");
+      if (!v.name) throw new Error("Введите имя");
+      await api("/api/users", { body: v });
+      closeSheet(); toast(`✅ ${v.name} добавлен(а)`); ACTIONS.users();
+    },
+  }),
+  "user-del": async (id, el) => {
+    const name = el.closest(".row").querySelector(".t").textContent;
+    if (!confirm(`Удалить пользователя «${name}»?`)) return;
+    try { await api(`/api/users/${id}`, { method: "DELETE" }); toast("✅ Удалён"); ACTIONS.users(); } catch (e) { toast(e.message, true); }
+  },
+};
+
+// уменьшаем фото перед отправкой (быстрее загрузка через мобильный интернет)
+function shrinkImage(file, max = 1600) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src);
+      resolve(c.toDataURL("image/jpeg", 0.85).split(",")[1]);
+    };
+    img.onerror = () => reject(new Error("Не удалось открыть фото"));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+// ───────── запуск ─────────
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+$("#refresh").onclick = () => { refresh(); toast("Обновлено"); };
+document.addEventListener("visibilitychange", () => { if (!document.hidden && S.token && !S.sheets.length) refresh(); });
+if (S.token) startApp(); else showLogin();
+</script>
+</body>
+</html>
