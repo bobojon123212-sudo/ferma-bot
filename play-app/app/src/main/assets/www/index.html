@@ -1,0 +1,973 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#2f5d3a">
+<title>Ферма — учёт коров</title>
+<style>
+:root{
+  --bg:#f4f1ea; --card:#ffffff; --ink:#1f2a22; --muted:#6b7468; --line:#e4dfd3;
+  --green:#2f5d3a; --green2:#3f7a4d; --green-soft:#e3eee5; --wheat:#d9a441; --wheat-soft:#f8eed8;
+  --red:#b83a2e; --red-soft:#f7e2df; --shadow:0 1px 2px rgba(31,42,34,.06),0 4px 14px rgba(31,42,34,.06);
+  --r:16px; --safe-b:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 -apple-system,"Segoe UI",Roboto,system-ui,sans-serif}
+body{min-height:100vh}
+button,input,select,textarea{font:inherit;color:inherit}
+.hidden{display:none!important}
+
+/* ── шапка ── */
+header{position:sticky;top:0;z-index:5;background:var(--green);color:#fff;padding:14px 16px 12px;display:flex;align-items:center;gap:10px}
+header h1{font-size:19px;margin:0;flex:1;font-weight:700;letter-spacing:.2px}
+.icon-btn{background:rgba(255,255,255,.14);border:0;color:#fff;width:38px;height:38px;border-radius:12px;font-size:18px;display:grid;place-items:center}
+.icon-btn:active{background:rgba(255,255,255,.28)}
+main{padding:14px 16px calc(96px + var(--safe-b))}
+
+/* ── нижнее меню ── */
+nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:6;background:#fff;border-top:1px solid var(--line);display:flex;padding:6px 6px calc(6px + var(--safe-b))}
+nav.tabs button{flex:1;background:none;border:0;padding:6px 0;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--muted)}
+nav.tabs button .i{font-size:21px;line-height:1;filter:grayscale(1);opacity:.65}
+nav.tabs button.on{color:var(--green);font-weight:600}
+nav.tabs button.on .i{filter:none;opacity:1}
+nav.tabs .plus{flex:0 0 64px}
+nav.tabs .plus span.i{width:52px;height:52px;margin-top:-22px;border-radius:50%;background:var(--wheat);color:#fff;display:grid;place-items:center;font-size:30px;filter:none;opacity:1;box-shadow:0 4px 12px rgba(217,164,65,.45);font-weight:300}
+
+/* ── карточки ── */
+.card{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:14px;margin-bottom:12px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.stat{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:12px 14px}
+.stat .l{font-size:12px;color:var(--muted)}
+.stat .v{font-size:20px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+.stat .v small{font-size:12px;font-weight:500;color:var(--muted)}
+.stat.big{grid-column:1/-1;background:var(--green);color:#fff}
+.stat.big .l{color:rgba(255,255,255,.75)}
+.stat.big .v{font-size:26px}
+.stat.big .v small{color:rgba(255,255,255,.75)}
+h2{font-size:15px;margin:18px 2px 8px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.row .grow{flex:1;min-width:0}
+.row .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .s{font-size:12.5px;color:var(--muted)}
+.row .amt{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.empty{text-align:center;color:var(--muted);padding:28px 12px}
+.empty .e{font-size:40px;margin-bottom:6px}
+.warn{background:var(--wheat-soft);color:#7a5714;border-radius:12px;padding:10px 12px;margin-bottom:12px;font-size:14px}
+
+/* ── коровы ── */
+.seg{display:flex;background:#e7e2d6;border-radius:12px;padding:3px;margin-bottom:12px}
+.seg button{flex:1;border:0;background:none;padding:8px;border-radius:10px;font-weight:600;color:var(--muted)}
+.seg button.on{background:#fff;color:var(--ink);box-shadow:var(--shadow)}
+.cow{display:flex;gap:12px;align-items:center}
+.thumb{width:58px;height:58px;border-radius:14px;background:var(--green-soft) center/cover no-repeat;display:grid;place-items:center;font-size:28px;flex:none}
+.cow .name{font-weight:700;font-size:16px}
+.cow .meta{font-size:12.5px;color:var(--muted)}
+.cow .sum{text-align:right}
+.cow .sum b{display:block;font-size:16px;font-variant-numeric:tabular-nums}
+.pos{color:var(--green2)} .neg{color:var(--red)}
+.pill{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:99px;background:var(--green-soft);color:var(--green);font-weight:600}
+.pill.red{background:var(--red-soft);color:var(--red)}
+
+.bar{height:8px;background:#ece7db;border-radius:99px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;background:var(--green2);border-radius:99px}
+.bar.low i{background:var(--wheat)}
+
+/* ── кнопки и формы ── */
+.btn{display:block;width:100%;border:0;border-radius:14px;padding:14px;font-weight:700;font-size:16px;background:var(--green);color:#fff}
+.btn:active{filter:brightness(.92)}
+.btn:disabled{opacity:.55}
+.btn.sec{background:var(--green-soft);color:var(--green)}
+.btn.wheat{background:var(--wheat)}
+.btn.danger{background:var(--red-soft);color:var(--red)}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.btns.three{grid-template-columns:1fr 1fr 1fr}
+.btns .btn{font-size:14px;padding:12px 8px}
+label.f{display:block;margin-bottom:14px}
+label.f>span{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600}
+.inp{width:100%;border:1.5px solid var(--line);background:#fff;border-radius:12px;padding:13px 14px;font-size:16px;outline:none}
+.inp:focus{border-color:var(--green2)}
+textarea.inp{min-height:70px;resize:vertical}
+.hint{font-size:12.5px;color:var(--muted);margin-top:5px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1.5px solid var(--line);background:#fff;border-radius:99px;padding:8px 13px;font-size:14px}
+.chip.on{border-color:var(--green);background:var(--green-soft);color:var(--green);font-weight:600}
+.list-btn{display:flex;align-items:center;gap:12px;width:100%;background:#fff;border:0;padding:14px;border-radius:14px;box-shadow:var(--shadow);margin-bottom:10px;text-align:left;font-size:15.5px}
+.list-btn .i{font-size:22px;width:30px;text-align:center}
+.list-btn .grow{flex:1}
+.list-btn .s{display:block;font-size:12.5px;color:var(--muted)}
+.list-btn::after{content:"›";color:var(--muted);font-size:22px}
+
+/* ── всплывающие окна ── */
+.sheet-wrap{position:fixed;inset:0;z-index:20;background:rgba(20,28,22,.45);display:flex;align-items:flex-end;animation:fade .18s}
+.sheet{background:var(--bg);width:100%;max-height:94vh;border-radius:22px 22px 0 0;display:flex;flex-direction:column;animation:up .22s cubic-bezier(.2,.8,.3,1)}
+.sheet-head{display:flex;align-items:center;padding:14px 16px 8px;gap:8px}
+.sheet-head h3{flex:1;margin:0;font-size:18px}
+.sheet-head .x{border:0;background:#e7e2d6;width:34px;height:34px;border-radius:50%;font-size:17px}
+.sheet-body{overflow:auto;padding:6px 16px calc(20px + var(--safe-b))}
+@keyframes up{from{transform:translateY(40px);opacity:.4}}
+@keyframes fade{from{opacity:0}}
+.actions .list-btn{box-shadow:none;border:1px solid var(--line)}
+
+.toast{position:fixed;left:16px;right:16px;bottom:calc(88px + var(--safe-b));z-index:40;background:#1f2a22;color:#fff;padding:12px 14px;border-radius:12px;font-size:14.5px;animation:up .2s;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.toast.err{background:var(--red)}
+.loading{display:flex;justify-content:center;padding:40px}
+.spin{width:30px;height:30px;border:3px solid var(--green-soft);border-top-color:var(--green);border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+.photos{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.photos img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;background:var(--green-soft)}
+.viewer{position:fixed;inset:0;z-index:50;background:#000;display:grid;place-items:center}
+.viewer img{max-width:100%;max-height:100%}
+
+.result{text-align:center;padding:8px 0 4px}
+.result .big{font-size:30px;font-weight:800;margin:6px 0}
+.kv{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14.5px}
+.kv:last-child{border-bottom:0}
+.kv b{font-variant-numeric:tabular-nums}
+.month-nav{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.month-nav b{flex:1;text-align:center;font-size:16px;text-transform:capitalize}
+.month-nav button{border:0;background:#fff;box-shadow:var(--shadow);width:40px;height:40px;border-radius:12px;font-size:18px}
+
+/* ── вход ── */
+.login{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:28px 22px}
+.login .logo{width:84px;height:84px;border-radius:24px;background:var(--green);display:grid;place-items:center;font-size:46px;margin:0 auto 14px;box-shadow:0 8px 24px rgba(47,93,58,.3)}
+.login h1{text-align:center;margin:0 0 4px;font-size:26px}
+.login p.sub{text-align:center;color:var(--muted);margin:0 0 26px}
+.code-inp{text-align:center;font-size:28px;letter-spacing:12px;font-weight:700}
+.link{background:none;border:0;color:var(--green);font-weight:600;padding:12px;width:100%}
+
+/* ── офлайн-версия ── */
+.welcome{text-align:center;padding:26px 18px}
+.welcome .e{font-size:54px}
+.welcome h3{margin:6px 0 6px;font-size:21px}
+.welcome p{color:var(--muted);margin:0 0 14px}
+.welcome ol{text-align:left;margin:0 0 18px;padding-left:22px;line-height:1.9}
+.del{border:0;background:var(--red-soft);color:var(--red);width:30px;height:30px;border-radius:50%;font-size:13px;flex:none;margin-left:6px}
+.btn.danger-solid{background:var(--red);color:#fff}
+.card.total{background:var(--green);color:#fff}
+.viewer{flex-direction:column}
+.viewer img{max-height:calc(100% - 80px)}
+.viewer-bar{position:absolute;left:0;right:0;bottom:0;display:flex;gap:10px;padding:14px 16px calc(14px + var(--safe-b))}
+.viewer-bar button{flex:1;border:0;border-radius:12px;padding:12px;background:rgba(255,255,255,.15);color:#fff;font-weight:600}
+input[type=date].inp{min-height:50px}
+.toast{bottom:auto;top:70px}
+</style>
+</head>
+<body>
+<div id="shell">
+  <header>
+    <h1 id="title">Ферма</h1>
+    <button class="icon-btn" id="refresh" aria-label="Обновить">⟳</button>
+  </header>
+  <main id="view"></main>
+  <nav class="tabs" id="tabs">
+    <button data-tab="home"><span class="i">🏠</span>Главная</button>
+    <button data-tab="cows"><span class="i">🐄</span>Коровы</button>
+    <button class="plus" data-tab="add"><span class="i">+</span></button>
+    <button data-tab="stock"><span class="i">🏪</span>Склад</button>
+    <button data-tab="more"><span class="i">☰</span>Ещё</button>
+  </nav>
+</div>
+
+<script>
+"use strict";
+// ═════════════════ ЛОКАЛЬНАЯ БАЗА (данные хранятся только в телефоне) ═════════════════
+const HAS_NATIVE = typeof window.Android !== "undefined";
+const FIXED_CATEGORIES = ["💧 Вода/Поилка", "💊 Лекарства", "👨‍⚕️ Ветеринар", "🔧 Инвентарь", "🚛 Транспорт", "💰 Другое"];
+const UNITS = ["кг", "т", "л", "шт", "мешок", "тюк"];
+const CURRENCIES = ["сомон", "сум", "сом", "тенге", "рубль", "манат", "$", "€"];
+
+function defaultDB() {
+  return {
+    v: 1, seq: 10,
+    cows: [], expenses: [], stock: [], writeoffs: [], photos: [],
+    products: [
+      { id: 1, name: "🌾 Отруб", unit: "кг" },
+      { id: 2, name: "🌽 Кунчора", unit: "кг" },
+      { id: 3, name: "🌿 Ках", unit: "тюк" },
+      { id: 4, name: "🌾 Сено", unit: "кг" },
+      { id: 5, name: "🌽 Комбикорм", unit: "кг" },
+    ],
+    settings: { currency: "сомон" },
+  };
+}
+
+let DB;
+function loadDB() {
+  let txt = null;
+  try { txt = HAS_NATIVE ? Android.loadData() : localStorage.getItem("ferma_db"); } catch (e) {}
+  try { DB = txt ? JSON.parse(txt) : null; } catch (e) { DB = null; }
+  if (!DB || !Array.isArray(DB.cows)) DB = defaultDB();
+  const d = defaultDB();
+  for (const k of Object.keys(d)) if (DB[k] === undefined) DB[k] = d[k];
+}
+function saveDB() {
+  const txt = JSON.stringify(DB);
+  try {
+    if (HAS_NATIVE) { if (!Android.saveData(txt)) throw new Error(); }
+    else localStorage.setItem("ferma_db", txt);
+  } catch (e) { toast("Не удалось сохранить данные. Освободите место в телефоне.", true); throw e; }
+}
+const nextId = () => DB.seq++;
+
+// время: локальное время телефона, формат как в боте (YYYY-MM-DDTHH:MM:SS)
+const pad = n => String(n).padStart(2, "0");
+function nowIso() { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }
+const todayStr = () => nowIso().slice(0, 10);
+const dayNum = s => { const [y, m, d] = s.slice(0, 10).split("-").map(Number); return Date.UTC(y, m - 1, d) / 864e5; };
+const daysBetween = (from, to) => Math.round(dayNum(to) - dayNum(from)) + 1;
+
+function L_num(v, field, { required = true, positive = true } = {}) {
+  if ((v === "" || v == null) && !required) return 0;
+  const n = Number(String(v).replace(/\s/g, "").replace(",", "."));
+  if (!isFinite(n)) throw new Error(`Неверное значение: ${field}`);
+  if (positive && n <= 0) throw new Error(`${field}: число должно быть больше нуля`);
+  if (n < 0) throw new Error(`${field}: число не может быть отрицательным`);
+  return n;
+}
+const allCategories = () => [...DB.products.map(p => p.name), ...FIXED_CATEGORIES];
+const productUnit = name => (DB.products.find(p => p.name === name) || {}).unit || "кг";
+
+const L = {
+  cows(status = "active") {
+    const list = DB.cows.filter(c => c.status === status);
+    list.sort((a, b) => status === "active" ? a.buy_date.localeCompare(b.buy_date) : (b.sell_date || "").localeCompare(a.sell_date || ""));
+    return list.map(c => {
+      const exps = DB.expenses.filter(e => e.cow_id === c.id);
+      const catMap = {};
+      exps.forEach(e => catMap[e.category] = (catMap[e.category] || 0) + e.amount);
+      const categories = Object.entries(catMap).map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount);
+      const expenses = exps.reduce((a, e) => a + e.amount, 0);
+      const total_cost = c.buy_price + expenses;
+      const item = { ...c, expenses, total_cost, categories,
+        history: exps.slice().sort((a, b) => b.created_at.localeCompare(a.created_at)),
+        photos: DB.photos.filter(p => p.cow_id === c.id).sort((a, b) => a.added_at.localeCompare(b.added_at)) };
+      if (status === "active") item.days = daysBetween(c.buy_date, todayStr());
+      else { item.profit = (c.sell_price || 0) - total_cost; item.days = daysBetween(c.buy_date, c.sell_date || todayStr()); }
+      return item;
+    });
+  },
+  addCow(v) {
+    const name = String(v.name || "").trim().slice(0, 60);
+    if (!name) throw new Error("Введите имя коровы");
+    const cow = { id: nextId(), name, buy_price: L_num(v.price, "Цена покупки"), buy_weight: L_num(v.weight, "Вес", { required: false, positive: false }),
+      buy_date: (v.date ? v.date + "T12:00:00" : nowIso()), note: String(v.note || "").slice(0, 500), status: "active" };
+    if (cow.buy_date.slice(0, 10) > todayStr()) throw new Error("Дата покупки не может быть в будущем");
+    DB.cows.push(cow); saveDB();
+    return cow;
+  },
+  sell(id, v) {
+    const c = DB.cows.find(x => x.id === id);
+    if (!c) throw new Error("Корова не найдена");
+    if (c.status !== "active") throw new Error("Эта корова уже продана");
+    const price = L_num(v.price, "Цена продажи");
+    const expenses = DB.expenses.filter(e => e.cow_id === id).reduce((a, e) => a + e.amount, 0);
+    Object.assign(c, { status: "sold", sell_price: price, sell_weight: L_num(v.weight, "Вес", { required: false, positive: false }), sell_date: nowIso(), sell_note: String(v.note || "").slice(0, 500) });
+    saveDB();
+    const total_cost = c.buy_price + expenses;
+    return { name: c.name, days: daysBetween(c.buy_date, todayStr()), buy_price: c.buy_price, expenses, total_cost, sell_price: price, profit: price - total_cost };
+  },
+  unsell(id) {
+    const c = DB.cows.find(x => x.id === id);
+    Object.assign(c, { status: "active", sell_price: null, sell_weight: null, sell_date: null, sell_note: null });
+    saveDB();
+  },
+  deleteCow(id) {
+    DB.photos.filter(p => p.cow_id === id).forEach(p => deletePhotoFile(p.url));
+    DB.photos = DB.photos.filter(p => p.cow_id !== id);
+    DB.expenses = DB.expenses.filter(e => e.cow_id !== id);
+    DB.cows = DB.cows.filter(c => c.id !== id);
+    saveDB();
+  },
+  addExpense(v) {
+    if (!allCategories().includes(v.category)) throw new Error("Выберите категорию");
+    const amount = L_num(v.amount, "Сумма");
+    let targets;
+    if (v.cow_id === "all") {
+      targets = DB.cows.filter(c => c.status === "active");
+      if (!targets.length) throw new Error("Нет активных коров");
+    } else {
+      const c = DB.cows.find(x => x.id === Number(v.cow_id));
+      if (!c) throw new Error("Выберите корову");
+      if (c.status !== "active") throw new Error("Эта корова уже продана");
+      targets = [c];
+    }
+    const share = amount / targets.length, now = nowIso();
+    targets.forEach(c => DB.expenses.push({ id: nextId(), cow_id: c.id, category: v.category, amount: share, note: String(v.note || "").slice(0, 300), created_at: now }));
+    saveDB();
+    return { share, cows: targets.map(c => c.name) };
+  },
+  deleteExpense(id) { DB.expenses = DB.expenses.filter(e => e.id !== id); saveDB(); },
+  cowName: id => (DB.cows.find(c => c.id === id) || {}).name || "—",
+  today() {
+    const t = todayStr();
+    const rows = DB.expenses.filter(e => e.created_at.slice(0, 10) === t).sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map(e => ({ ...e, cow: L.cowName(e.cow_id) }));
+    return { date: t, rows, total: rows.reduce((a, r) => a + r.amount, 0) };
+  },
+  month(ym) {
+    const rows = DB.expenses.filter(e => e.created_at.slice(0, 7) === ym);
+    const byCow = {};
+    rows.forEach(e => {
+      const n = L.cowName(e.cow_id);
+      byCow[n] = byCow[n] || {};
+      byCow[n][e.category] = (byCow[n][e.category] || 0) + e.amount;
+    });
+    const cows = Object.entries(byCow).map(([name, cats]) => {
+      const categories = Object.entries(cats).map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount);
+      return { name, categories, total: categories.reduce((a, c) => a + c.amount, 0) };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+    return { month: ym, cows, total: cows.reduce((a, c) => a + c.total, 0) };
+  },
+  stock() {
+    return DB.stock.filter(s => s.kg_left > 1e-9).sort((a, b) => b.bought_date.localeCompare(a.bought_date)).map(s => ({
+      ...s, unit: s.unit || "кг", price_per_kg: s.price_total / s.kg_total, percent: Math.round(s.kg_left / s.kg_total * 100) }));
+  },
+  buyStock(v) {
+    const name = String(v.name || "").trim();
+    if (!name) throw new Error("Выберите корм");
+    const kg = L_num(v.kg, "Количество"), price = L_num(v.price, "Сумма");
+    DB.stock.push({ id: nextId(), feed_name: name, unit: productUnit(name), kg_total: kg, kg_left: kg, price_total: price, bought_date: nowIso() });
+    saveDB();
+    return { price_per_kg: price / kg, unit: productUnit(name) };
+  },
+  writeoff(id, v) {
+    const s = DB.stock.find(x => x.id === id);
+    if (!s) throw new Error("Корм не найден");
+    const kg = L_num(v.kg, "Количество");
+    if (kg > s.kg_left + 1e-9) throw new Error(`На складе только ${fmt(s.kg_left)} ${s.unit || "кг"}`);
+    const cost = kg * s.price_total / s.kg_total;
+    const cows = DB.cows.filter(c => c.status === "active");
+    const share = cows.length ? cost / cows.length : 0, now = nowIso();
+    s.kg_left = Math.max(0, s.kg_left - kg);
+    DB.writeoffs.push({ id: nextId(), stock_id: id, kg_used: kg, created_at: now });
+    cows.forEach(c => DB.expenses.push({ id: nextId(), cow_id: c.id, category: s.feed_name, amount: share, note: `Склад: ${fmt(kg)} ${s.unit || "кг"}`, created_at: now }));
+    saveDB();
+    return { cost, share, kg_left: s.kg_left, cows: cows.map(c => c.name), low: s.kg_left / s.kg_total < 0.2 };
+  },
+  deleteStock(id) { DB.stock = DB.stock.filter(s => s.id !== id); saveDB(); },
+  addProduct(v) {
+    const name = String(v.name || "").trim().slice(0, 40);
+    if (!name) throw new Error("Введите наименование");
+    if (allCategories().includes(name)) throw new Error(`«${name}» уже есть`);
+    if (!UNITS.includes(v.unit)) throw new Error("Выберите единицу");
+    DB.products.push({ id: nextId(), name, unit: v.unit }); saveDB();
+  },
+  deleteProduct(id) { DB.products = DB.products.filter(p => p.id !== id); saveDB(); },
+  summary() {
+    const cows = L.cows("active"), t = L.today();
+    return { cows_count: cows.length, invested: cows.reduce((a, c) => a + c.total_cost, 0), today_total: t.total, today: t.rows,
+      month_total: L.month(todayStr().slice(0, 7)).total, low_stock: L.stock().filter(s => s.percent < 20),
+      sold_count: DB.cows.filter(c => c.status === "sold").length };
+  },
+};
+
+// ── фото ──
+function savePhotoFile(b64) { return HAS_NATIVE ? Android.savePhoto(b64) : "data:image/jpeg;base64," + b64; }
+function deletePhotoFile(url) { try { if (HAS_NATIVE && url.startsWith("file:")) Android.deletePhoto(url); } catch (e) {} }
+function readPhotoB64(url) {
+  if (url.startsWith("data:")) return url.split(",")[1];
+  try { return HAS_NATIVE ? Android.readPhoto(url) : ""; } catch (e) { return ""; }
+}
+
+// ═════════════════ ИНТЕРФЕЙС ═════════════════
+const S = { tab: "home", cowsTab: "active", month: null, sheets: [] };
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = n => { const v = Number(n) || 0; return (Math.abs(v) < 100 && v % 1 ? Math.round(v * 100) / 100 : Math.round(v)).toLocaleString("ru-RU"); };
+const cur = () => esc(DB.settings.currency || "сомон");
+const money = n => `${fmt(n)} <small>${cur()}</small>`;
+const signed = n => (n >= 0 ? "+" : "−") + fmt(Math.abs(n));
+const dDate = iso => iso ? iso.slice(8, 10) + "." + iso.slice(5, 7) + "." + iso.slice(0, 4) : "—";
+const dTime = iso => iso ? iso.slice(11, 16) : "";
+
+function toast(msg, err = false) {
+  document.querySelectorAll(".toast").forEach(t => t.remove());
+  const t = document.createElement("div");
+  t.className = "toast" + (err ? " err" : "");
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), err ? 4200 : 2600);
+}
+
+const TABS = {
+  home: { title: "Ферма", render: renderHome },
+  cows: { title: "Коровы", render: renderCows },
+  stock: { title: "Склад корма", render: renderStock },
+  more: { title: "Ещё", render: renderMore },
+};
+
+function switchTab(tab) {
+  if (tab === "add") return openAddMenu();
+  S.tab = tab;
+  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
+  $("#title").textContent = TABS[tab].title;
+  window.scrollTo(0, 0);
+  refresh();
+}
+function refresh() {
+  const view = $("#view");
+  try { view.innerHTML = TABS[S.tab].render(); }
+  catch (e) { console.error(e); view.innerHTML = `<div class="card empty"><div class="e">⚠️</div>${esc(e.message)}</div>`; }
+  bindView(view);
+}
+function bindView(root) {
+  root.querySelectorAll("[data-act]").forEach(el => {
+    el.onclick = e => { e.stopPropagation(); ACTIONS[el.dataset.act]?.(el.dataset.id, el); };
+  });
+}
+
+// ───────── Главная ─────────
+function renderHome() {
+  const d = L.summary();
+  if (!d.cows_count && !d.sold_count && !DB.stock.length) {
+    return `<div class="card welcome">
+      <div class="e">🐄</div>
+      <h3>Добро пожаловать!</h3>
+      <p>Ведите учёт коров: сколько потратили на корм и уход и сколько заработали при продаже.</p>
+      <ol>
+        <li><b>Добавьте корову</b> — имя и цену покупки</li>
+        <li><b>Записывайте расходы</b> — корм, лекарства, ветеринар</li>
+        <li><b>Продайте</b> — приложение покажет прибыль или убыток</li>
+      </ol>
+      <button class="btn" data-act="cow-add">+ Добавить первую корову</button>
+      <p class="hint" style="margin-top:12px">Данные хранятся только в вашем телефоне. Интернет не нужен.</p>
+    </div>`;
+  }
+  let html = `<div class="stats">
+    <div class="stat big"><div class="l">Всего вложено в активных коров</div><div class="v">${money(d.invested)}</div></div>
+    <div class="stat" data-act="go-cows"><div class="l">Активных коров</div><div class="v">${d.cows_count}</div></div>
+    <div class="stat" data-act="today"><div class="l">Расход сегодня</div><div class="v">${fmt(d.today_total)}</div></div>
+    <div class="stat" style="grid-column:1/-1" data-act="month"><div class="l">Расход за этот месяц ›</div><div class="v">${money(d.month_total)}</div></div>
+  </div>`;
+  html += d.low_stock.map(s => `<div class="warn">⚠️ Мало корма: <b>${esc(s.feed_name)}</b> — осталось ${fmt(s.kg_left)} ${esc(s.unit)} (${s.percent}%)</div>`).join("");
+  html += `<div class="btns" style="margin:0 0 4px"><button class="btn" data-act="expense">💸 Расход</button><button class="btn wheat" data-act="writeoff-pick">📤 Списать корм</button></div>`;
+  html += `<h2>Расходы за сегодня</h2>`;
+  if (!d.today.length) html += `<div class="card empty"><div class="e">📅</div>Сегодня расходов ещё нет</div>`;
+  else html += `<div class="card">${d.today.map(r => `
+      <div class="row"><div class="grow"><div class="t">${esc(r.category)}</div>
+      <div class="s">🐄 ${esc(r.cow)} · ${dTime(r.created_at)}${r.note ? " · " + esc(r.note) : ""}</div></div>
+      <div class="amt">${fmt(r.amount)}</div></div>`).join("")}
+      <div class="row"><div class="grow t">Итого</div><div class="amt">${money(d.today_total)}</div></div></div>`;
+  return html;
+}
+
+// ───────── Коровы ─────────
+function renderCows() {
+  const st = S.cowsTab, cows = L.cows(st);
+  let html = `<div class="seg"><button class="${st === "active" ? "on" : ""}" data-act="cows-tab" data-id="active">Активные</button><button class="${st === "sold" ? "on" : ""}" data-act="cows-tab" data-id="sold">Проданные</button></div>`;
+  if (!cows.length) {
+    return html + (st === "active"
+      ? `<div class="card empty"><div class="e">🐄</div>Активных коров нет<br><br><button class="btn" data-act="cow-add" style="max-width:240px;margin:auto">Добавить корову</button></div>`
+      : `<div class="card empty"><div class="e">💰</div>Проданных коров пока нет</div>`);
+  }
+  if (st === "active") {
+    html += `<div class="stats"><div class="stat"><div class="l">Коров</div><div class="v">${cows.length}</div></div><div class="stat"><div class="l">Вложено</div><div class="v">${fmt(cows.reduce((a, c) => a + c.total_cost, 0))}</div></div></div>`;
+  } else {
+    const p = cows.reduce((a, c) => a + c.profit, 0);
+    html += `<div class="stats"><div class="stat"><div class="l">Продано</div><div class="v">${cows.length}</div></div><div class="stat"><div class="l">Итог</div><div class="v ${p >= 0 ? "pos" : "neg"}">${signed(p)}</div></div></div>`;
+  }
+  html += cows.map(c => `
+    <div class="card cow" data-act="cow" data-id="${c.id}">
+      <div class="thumb" ${c.photos.length ? `style="background-image:url('${esc(c.photos[c.photos.length - 1].url)}')"` : ""}>${c.photos.length ? "" : "🐄"}</div>
+      <div style="flex:1;min-width:0">
+        <div class="name">${esc(c.name)}</div>
+        <div class="meta">${st === "active" ? `${c.days} дн. в хозяйстве` : `продана ${dDate(c.sell_date)}`} · куплена за ${fmt(c.buy_price)}</div>
+      </div>
+      <div class="sum">${st === "active"
+        ? `<b>${fmt(c.total_cost)}</b><span class="meta">вложено</span>`
+        : `<b class="${c.profit >= 0 ? "pos" : "neg"}">${signed(c.profit)}</b><span class="meta">${c.profit >= 0 ? "прибыль" : "убыток"}</span>`}</div>
+    </div>`).join("");
+  if (st === "active") html += `<button class="btn sec" data-act="cow-add">+ Добавить корову</button>`;
+  return html;
+}
+
+function findCow(id) {
+  id = Number(id);
+  for (const k of ["active", "sold"]) { const c = L.cows(k).find(x => x.id === id); if (c) return c; }
+}
+
+function openCow(id, replace = false) {
+  const c = findCow(id); if (!c) return;
+  const sold = c.status === "sold";
+  const cats = c.categories.length
+    ? c.categories.map(x => `<div class="kv"><span>${esc(x.category)}</span><b>${fmt(x.amount)}</b></div>`).join("")
+    : `<div class="hint">Расходов ещё нет</div>`;
+  const hist = c.history.slice(0, 50).map(e => `
+    <div class="row"><div class="grow"><div class="t">${esc(e.category)}</div><div class="s">${dDate(e.created_at)} ${dTime(e.created_at)}${e.note ? " · " + esc(e.note) : ""}</div></div>
+    <div class="amt">${fmt(e.amount)}</div><button class="del" data-act="exp-del" data-id="${e.id}" aria-label="Удалить">✕</button></div>`).join("");
+  const body = `
+    <div class="card">
+      <div class="kv"><span>📅 Дата покупки</span><b>${dDate(c.buy_date)}</b></div>
+      <div class="kv"><span>⏱ Дней в хозяйстве</span><b>${c.days}</b></div>
+      <div class="kv"><span>💰 Цена покупки</span><b>${fmt(c.buy_price)}</b></div>
+      ${c.buy_weight ? `<div class="kv"><span>⚖️ Вес при покупке</span><b>${fmt(c.buy_weight)} кг</b></div>` : ""}
+      <div class="kv"><span>💸 Корм и уход</span><b>${fmt(c.expenses)}</b></div>
+      <div class="kv"><span>📊 Итого вложено</span><b>${money(c.total_cost)}</b></div>
+      ${sold ? `
+        <div class="kv"><span>💵 Цена продажи</span><b>${fmt(c.sell_price)}</b></div>
+        ${c.sell_weight ? `<div class="kv"><span>⚖️ Вес при продаже</span><b>${fmt(c.sell_weight)} кг</b></div>` : ""}
+        <div class="kv"><span>${c.profit >= 0 ? "🟢 Прибыль" : "🔴 Убыток"}</span><b class="${c.profit >= 0 ? "pos" : "neg"}">${signed(c.profit)} ${cur()}</b></div>` : ""}
+      ${c.note ? `<div class="hint" style="margin-top:8px">📝 ${esc(c.note)}</div>` : ""}
+    </div>
+    ${!sold ? `<div class="btns three" style="margin:0 0 12px">
+      <button class="btn" data-act="expense" data-id="${c.id}">💸 Расход</button>
+      <button class="btn sec" data-act="photo-add" data-id="${c.id}">📸 Фото</button>
+      <button class="btn wheat" data-act="sell" data-id="${c.id}">💰 Продать</button></div>` : ""}
+    <h2>Расходы по категориям</h2><div class="card">${cats}</div>
+    <h2>Фото (${c.photos.length})</h2>
+    ${c.photos.length ? `<div class="photos">${c.photos.map(p => `<img loading="lazy" src="${esc(p.url)}" data-act="photo-view" data-id="${p.id}">`).join("")}</div>`
+      : `<div class="card empty" style="padding:18px">Фото нет</div>`}
+    ${c.history.length ? `<h2>История расходов</h2><div class="card">${hist}</div>` : ""}
+    <div class="btns" style="margin-top:18px">
+      ${sold ? `<button class="btn sec" data-act="cow-unsell" data-id="${c.id}">↩ Отменить продажу</button>` : `<span></span>`}
+      <button class="btn danger" data-act="cow-del" data-id="${c.id}">🗑 Удалить корову</button>
+    </div>`;
+  const fn = replace ? replaceSheet : openSheet;
+  fn(`🐄 ${esc(c.name)}`, body).dataset.cow = c.id;
+}
+function reopenCow(id) { closeAllSheets(); refresh(); openCow(id); }
+
+// ───────── Склад ─────────
+function renderStock() {
+  const stock = L.stock();
+  let html = `<div class="btns" style="margin:0 0 12px"><button class="btn" data-act="stock-buy">📦 Купить корм</button><button class="btn wheat" data-act="writeoff-pick">📤 Списать</button></div>`;
+  if (!stock.length) return html + `<div class="card empty"><div class="e">🏪</div>Склад пустой<br><span class="hint">Купите корм — потом списывайте его по мере расхода, стоимость сама разделится на коров</span></div>`;
+  return html + stock.map(s => `
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="flex:1"><div style="font-weight:700;font-size:16px">${esc(s.feed_name)}</div>
+        <div class="hint" style="margin:0">куплен ${dDate(s.bought_date)} · ${fmt(s.price_per_kg)} ${cur()}/${esc(s.unit)}</div></div>
+        ${s.percent < 20 ? `<span class="pill red">мало</span>` : ""}
+      </div>
+      <div class="bar ${s.percent < 20 ? "low" : ""}"><i style="width:${Math.max(2, s.percent)}%"></i></div>
+      <div class="kv" style="margin-top:8px"><span>Осталось</span><b>${fmt(s.kg_left)} из ${fmt(s.kg_total)} ${esc(s.unit)} (${s.percent}%)</b></div>
+      <div class="kv"><span>Использовано</span><b>${fmt(s.kg_total - s.kg_left)} ${esc(s.unit)}</b></div>
+      <div class="btns" style="grid-template-columns:1fr auto">
+        <button class="btn sec" style="padding:11px" data-act="writeoff" data-id="${s.id}">📤 Списать</button>
+        <button class="btn danger" style="padding:11px 14px" data-act="stock-del" data-id="${s.id}" aria-label="Удалить">🗑</button>
+      </div>
+    </div>`).join("");
+}
+
+// ───────── Ещё ─────────
+function renderMore() {
+  return `
+    <h2 style="margin-top:4px">Отчёты</h2>
+    <button class="list-btn" data-act="today"><span class="i">📅</span><span class="grow">Отчёт за сегодня</span></button>
+    <button class="list-btn" data-act="month"><span class="i">📆</span><span class="grow">Отчёт за месяц<span class="s">можно листать месяцы</span></span></button>
+    <button class="list-btn" data-act="alltime"><span class="i">📋</span><span class="grow">Отчёт за всё время<span class="s">активные коровы</span></span></button>
+    <h2>Настройки</h2>
+    <button class="list-btn" data-act="products"><span class="i">🗂</span><span class="grow">Корма и товары<span class="s">категории расходов и склада</span></span></button>
+    <button class="list-btn" data-act="currency"><span class="i">💱</span><span class="grow">Валюта<span class="s">${cur()}</span></span></button>
+    <h2>Резервная копия</h2>
+    <button class="list-btn" data-act="backup"><span class="i">💾</span><span class="grow">Сохранить копию в файл<span class="s">на случай смены телефона</span></span></button>
+    <button class="list-btn" data-act="restore"><span class="i">📂</span><span class="grow">Восстановить из файла</span></button>
+    <button class="list-btn" data-act="wipe"><span class="i">🗑</span><span class="grow" style="color:var(--red)">Удалить все данные</span></button>
+    <p class="hint" style="text-align:center;margin-top:16px">Ферма — учёт коров · данные хранятся только в этом телефоне</p>`;
+}
+
+// ───────── всплывающие окна ─────────
+function openSheet(title, body, onMount) {
+  const wrap = document.createElement("div");
+  wrap.className = "sheet-wrap";
+  wrap.innerHTML = `<div class="sheet"><div class="sheet-head"><h3>${title}</h3><button class="x" aria-label="Закрыть">✕</button></div><div class="sheet-body">${body}</div></div>`;
+  wrap.onclick = e => { if (e.target === wrap) closeSheet(); };
+  $(".x", wrap).onclick = closeSheet;
+  document.body.appendChild(wrap);
+  S.sheets.push(wrap);
+  bindView(wrap);
+  onMount && onMount($(".sheet-body", wrap), wrap);
+  return wrap;
+}
+function closeSheet() { const w = S.sheets.pop(); w && w.remove(); }
+function closeAllSheets() { while (S.sheets.length) closeSheet(); }
+function replaceSheet(title, body, onMount) { closeSheet(); return openSheet(title, body, onMount); }
+const topKind = () => S.sheets.length ? S.sheets[S.sheets.length - 1].dataset.kind : null;
+function kindSheet(kind, title, body) {
+  const w = topKind() === kind ? replaceSheet(title, body) : openSheet(title, body);
+  w.dataset.kind = kind; return w;
+}
+
+// подтверждение действия
+function ask(text, okLabel = "Удалить", danger = true) {
+  return new Promise(resolve => {
+    const w = openSheet("Подтвердите", `<p style="font-size:16px;margin:4px 0 18px">${text}</p>
+      <div class="btns"><button class="btn sec" data-no>Отмена</button><button class="btn ${danger ? "danger-solid" : ""}" data-yes>${okLabel}</button></div>`);
+    w.dataset.kind = "ask";
+    $("[data-no]", w).onclick = () => { closeSheet(); resolve(false); };
+    $("[data-yes]", w).onclick = () => { closeSheet(); resolve(true); };
+    $(".x", w).onclick = () => { closeSheet(); resolve(false); };
+  });
+}
+
+// кнопка «Назад» Android
+window.appBack = function () {
+  if ($(".viewer")) { $(".viewer").remove(); return true; }
+  if (S.sheets.length) { closeSheet(); return true; }
+  if (S.tab !== "home") { switchTab("home"); return true; }
+  return false;
+};
+
+function formSheet({ title, fields, submit, onSubmit, intro = "" }) {
+  const body = intro + fields.map(f => {
+    if (f.type === "chips") return `<label class="f"><span>${f.label}</span><div class="chips" data-name="${f.name}">${f.options.map(o =>
+      `<button type="button" class="chip ${o.value === f.value ? "on" : ""}" data-v="${esc(o.value)}">${esc(o.label)}</button>`).join("")}</div>${f.hint ? `<div class="hint">${f.hint}</div>` : ""}</label>`;
+    const attrs = `class="inp" name="${f.name}" placeholder="${esc(f.placeholder || "")}" ${f.num ? 'inputmode="decimal"' : ""} ${f.type === "date" ? 'type="date"' : ""} value="${esc(f.value ?? "")}"`;
+    return `<label class="f"><span>${f.label}</span>${f.type === "textarea" ? `<textarea ${attrs}></textarea>` : `<input ${attrs}>`}${f.hint ? `<div class="hint" data-hint="${f.name}">${f.hint}</div>` : ""}</label>`;
+  }).join("") + `<button class="btn" data-submit>${submit}</button>`;
+  return openSheet(title, body, el => {
+    el.querySelectorAll(".chips").forEach(box => box.querySelectorAll(".chip").forEach(ch => ch.onclick = () => {
+      box.querySelectorAll(".chip").forEach(x => x.classList.remove("on")); ch.classList.add("on");
+      fields.find(x => x.name === box.dataset.name)?.onChange?.(ch.dataset.v, el);
+    }));
+    const first = el.querySelector("input.inp:not([type=date])"); if (first && !first.value && !el.querySelector(".chips")) setTimeout(() => first.focus(), 250);
+    const btn = el.querySelector("[data-submit]");
+    btn.onclick = async () => {
+      const v = {};
+      el.querySelectorAll("[name]").forEach(i => v[i.name] = i.value.trim());
+      el.querySelectorAll(".chips").forEach(b => v[b.dataset.name] = b.querySelector(".chip.on")?.dataset.v ?? "");
+      btn.disabled = true;
+      try { await onSubmit(v, el); } catch (e) { toast(e.message, true); }
+      btn.disabled = false;
+    };
+  });
+}
+
+function openAddMenu() {
+  openSheet("Что записать?", `<div class="actions">
+    <button class="list-btn" data-act="expense"><span class="i">💸</span><span class="grow">Записать расход<span class="s">на одну корову</span></span></button>
+    <button class="list-btn" data-act="expense" data-id="all"><span class="i">🐮</span><span class="grow">Расход на всех коров<span class="s">сумма делится поровну</span></span></button>
+    <button class="list-btn" data-act="writeoff-pick"><span class="i">📤</span><span class="grow">Списать корм со склада</span></button>
+    <button class="list-btn" data-act="stock-buy"><span class="i">📦</span><span class="grow">Купить корм на склад</span></button>
+    <button class="list-btn" data-act="cow-add"><span class="i">🐄</span><span class="grow">Добавить корову</span></button>
+    <button class="list-btn" data-act="sell"><span class="i">💰</span><span class="grow">Продать корову</span></button>
+  </div>`);
+}
+
+// ───────── действия ─────────
+const ACTIONS = {
+  "cows-tab": id => { S.cowsTab = id; refresh(); },
+  "go-cows": () => switchTab("cows"),
+  cow: id => openCow(id),
+  close: () => closeSheet(),
+
+  "cow-add": () => { closeAllSheets(); formSheet({
+    title: "🐄 Новая корова",
+    fields: [
+      { name: "name", label: "Имя или номер", placeholder: "Бурёнка, Корова 1, Чёрная" },
+      { name: "price", label: `Цена покупки (${cur()})`, num: true, placeholder: "например: 8000" },
+      { name: "date", label: "Дата покупки", type: "date", value: todayStr() },
+      { name: "weight", label: "Вес при покупке, кг (необязательно)", num: true },
+      { name: "note", label: "Заметка (необязательно)", type: "textarea" },
+    ],
+    submit: "Добавить корову",
+    onSubmit: v => {
+      const c = L.addCow(v);
+      closeSheet(); toast(`✅ Корова «${c.name}» добавлена`);
+      S.cowsTab = "active"; switchTab("cows"); openCow(c.id);
+    },
+  }); },
+
+  "cow-del": async id => {
+    const c = findCow(id);
+    if (!await ask(`Удалить корову <b>${esc(c.name)}</b> вместе со всеми её расходами и фото? Это нельзя отменить.`)) return;
+    L.deleteCow(c.id); closeAllSheets(); refresh(); toast("Корова удалена");
+  },
+  "cow-unsell": async id => {
+    if (!await ask("Отменить продажу? Корова снова станет активной.", "Отменить продажу", false)) return;
+    L.unsell(Number(id)); S.cowsTab = "active"; reopenCow(id); toast("Продажа отменена");
+  },
+  "exp-del": async (id, el) => {
+    const cowId = el.closest(".sheet-wrap").dataset.cow;
+    if (!await ask("Удалить эту запись расхода?")) return;
+    L.deleteExpense(Number(id)); reopenCow(cowId); toast("Запись удалена");
+  },
+
+  expense: cowId => {
+    closeAllSheets();
+    const cows = L.cows("active");
+    if (!cows.length) return toast("Нет активных коров. Сначала добавьте корову.", true);
+    const all = cowId === "all";
+    const fields = [];
+    if (!all) fields.push({ type: "chips", name: "cow", label: "Корова", value: cowId ? String(cowId) : (cows.length === 1 ? String(cows[0].id) : ""),
+      options: cows.map(c => ({ value: String(c.id), label: `🐄 ${c.name}` })) });
+    fields.push(
+      { type: "chips", name: "category", label: "Категория", options: allCategories().map(c => ({ value: c, label: c })) },
+      { name: "amount", label: all ? `Общая сумма (${cur()})` : `Сумма (${cur()})`, num: true, placeholder: "например: 500",
+        hint: all ? `Делится поровну на ${cows.length} коров(ы)` : "" },
+      { name: "note", label: "Заметка (необязательно)" },
+    );
+    formSheet({
+      title: all ? "💸 Расход на всех коров" : "💸 Записать расход",
+      intro: all ? `<div class="warn" style="background:var(--green-soft);color:var(--green)">Коровы: ${cows.map(c => esc(c.name)).join(", ")}</div>` : "",
+      fields, submit: "Записать расход",
+      onSubmit: v => {
+        if (!all && !v.cow) throw new Error("Выберите корову");
+        if (!v.category) throw new Error("Выберите категорию");
+        const r = L.addExpense({ cow_id: all ? "all" : v.cow, category: v.category, amount: v.amount, note: v.note });
+        closeSheet();
+        toast(all ? `✅ Записано: по ${fmt(r.share)} на ${r.cows.length} коров` : `✅ Расход записан: ${r.cows[0]} — ${fmt(r.share)}`);
+        refresh();
+      },
+    });
+  },
+
+  sell: cowId => {
+    closeAllSheets();
+    const cows = L.cows("active");
+    if (!cows.length) return toast("Нет активных коров", true);
+    const c0 = cowId && cows.find(c => c.id == cowId);
+    const fields = [];
+    if (!c0) fields.push({ type: "chips", name: "cow", label: "Какую корову продаёте?", options: cows.map(c => ({ value: String(c.id), label: `🐄 ${c.name}` })) });
+    fields.push(
+      { name: "price", label: `Цена продажи (${cur()})`, num: true },
+      { name: "weight", label: "Вес при продаже, кг (необязательно)", num: true },
+      { name: "note", label: "Заметка (необязательно)" },
+    );
+    formSheet({
+      title: c0 ? `💰 Продать: ${esc(c0.name)}` : "💰 Продажа коровы",
+      intro: c0 ? `<div class="card"><div class="kv"><span>Итого вложено</span><b>${money(c0.total_cost)}</b></div></div>` : "",
+      fields, submit: "Продать",
+      onSubmit: v => {
+        const id = c0 ? c0.id : Number(v.cow);
+        if (!id) throw new Error("Выберите корову");
+        const r = L.sell(id, v);
+        const pos = r.profit >= 0;
+        replaceSheet(`💰 ${esc(r.name)} продана!`, `
+          <div class="card result"><div>${pos ? "🟢 Прибыль" : "🔴 Убыток"}</div>
+          <div class="big ${pos ? "pos" : "neg"}">${signed(r.profit)} ${cur()}</div></div>
+          <div class="card">
+            <div class="kv"><span>📅 Дней в хозяйстве</span><b>${r.days}</b></div>
+            <div class="kv"><span>Цена покупки</span><b>${fmt(r.buy_price)}</b></div>
+            <div class="kv"><span>Корм и уход</span><b>${fmt(r.expenses)}</b></div>
+            <div class="kv"><span>Итого потрачено</span><b>${fmt(r.total_cost)}</b></div>
+            <div class="kv"><span>💵 Цена продажи</span><b>${fmt(r.sell_price)}</b></div>
+          </div><button class="btn" data-act="close">Готово</button>`);
+        refresh();
+      },
+    });
+  },
+
+  "photo-add": cowId => {
+    const inp = document.createElement("input");
+    inp.type = "file"; inp.accept = "image/*";
+    inp.onchange = async () => {
+      const file = inp.files[0]; if (!file) return;
+      try {
+        const b64 = await shrinkImage(file);
+        const url = savePhotoFile(b64);
+        if (!url) throw new Error("Не удалось сохранить фото");
+        DB.photos.push({ id: nextId(), cow_id: Number(cowId), url, added_at: nowIso() });
+        saveDB();
+        toast("✅ Фото добавлено"); reopenCow(cowId);
+      } catch (e) { toast(e.message, true); }
+    };
+    inp.click();
+  },
+  "photo-view": id => {
+    const p = DB.photos.find(x => x.id === Number(id)); if (!p) return;
+    const v = document.createElement("div");
+    v.className = "viewer";
+    v.innerHTML = `<img src="${esc(p.url)}"><div class="viewer-bar"><button data-close>✕ Закрыть</button><button data-del>🗑 Удалить фото</button></div>`;
+    $("[data-close]", v).onclick = () => v.remove();
+    $("img", v).onclick = () => v.remove();
+    $("[data-del]", v).onclick = async () => {
+      v.remove();
+      if (!await ask("Удалить это фото?")) return;
+      deletePhotoFile(p.url); DB.photos = DB.photos.filter(x => x.id !== p.id); saveDB(); reopenCow(p.cow_id);
+    };
+    document.body.appendChild(v);
+  },
+
+  "stock-buy": () => {
+    closeAllSheets();
+    if (!DB.products.length) return toast("Сначала добавьте корм в «Ещё → Корма и товары»", true);
+    formSheet({
+      title: "📦 Купить корм",
+      fields: [
+        { type: "chips", name: "name", label: "Вид корма", options: DB.products.map(p => ({ value: p.name, label: `${p.name} (${p.unit})` })),
+          onChange: (v, el) => { $(".f:nth-of-type(2) > span", el).textContent = `Сколько купили (${productUnit(v)})?`; } },
+        { name: "kg", label: "Сколько купили?", num: true, placeholder: "например: 1000" },
+        { name: "price", label: `Сколько заплатили за всё (${cur()})?`, num: true, placeholder: "например: 2500" },
+      ],
+      submit: "Добавить на склад",
+      onSubmit: v => {
+        const r = L.buyStock(v);
+        closeSheet(); toast(`✅ Корм на складе. Цена: ${fmt(r.price_per_kg)} за ${r.unit}`);
+        switchTab("stock");
+      },
+    });
+  },
+  "stock-del": async id => {
+    const s = DB.stock.find(x => x.id === Number(id));
+    if (!await ask(`Убрать <b>${esc(s.feed_name)}</b> со склада? Уже записанные расходы на коров останутся.`)) return;
+    L.deleteStock(s.id); refresh(); toast("Убрано со склада");
+  },
+
+  "writeoff-pick": () => {
+    closeAllSheets();
+    const stock = L.stock();
+    if (!stock.length) return toast("Склад пустой. Сначала купите корм.", true);
+    if (stock.length === 1) return ACTIONS.writeoff(stock[0].id);
+    openSheet("📤 Какой корм списываем?", `<div class="actions">${stock.map(s =>
+      `<button class="list-btn" data-act="writeoff" data-id="${s.id}"><span class="grow">${esc(s.feed_name)}<span class="s">осталось ${fmt(s.kg_left)} ${esc(s.unit)} · куплен ${dDate(s.bought_date)}</span></span></button>`).join("")}</div>`);
+  },
+
+  writeoff: id => {
+    const s = L.stock().find(x => x.id == id); if (!s) return;
+    closeAllSheets();
+    formSheet({
+      title: `📤 Списать: ${esc(s.feed_name)}`,
+      intro: `<div class="card"><div class="kv"><span>На складе</span><b>${fmt(s.kg_left)} ${esc(s.unit)}</b></div><div class="kv"><span>Цена за ${esc(s.unit)}</span><b>${fmt(s.price_per_kg)} ${cur()}</b></div></div>`,
+      fields: [{ name: "kg", label: `Сколько списать (${esc(s.unit)})?`, num: true, placeholder: "например: 20",
+        hint: "Стоимость запишется как расход, поровну на всех активных коров" }],
+      submit: "Списать",
+      onSubmit: v => {
+        const r = L.writeoff(s.id, v);
+        replaceSheet("✅ Списано со склада", `
+          <div class="card">
+            <div class="kv"><span>${esc(s.feed_name)}</span><b>${fmt(L_num(v.kg, ""))} ${esc(s.unit)}</b></div>
+            <div class="kv"><span>Общая стоимость</span><b>${money(r.cost)}</b></div>
+            <div class="kv"><span>Осталось на складе</span><b>${fmt(r.kg_left)} ${esc(s.unit)}</b></div>
+          </div>
+          ${r.low ? `<div class="warn">⚠️ Осталось мало корма!</div>` : ""}
+          <h2>Расход на коров (${fmt(r.share)} каждой)</h2>
+          <div class="card">${r.cows.length ? r.cows.map(n => `<div class="kv"><span>🐄 ${esc(n)}</span><b>${fmt(r.share)}</b></div>`).join("") : `<div class="hint">Нет активных коров — расход не записан</div>`}</div>
+          <button class="btn" data-act="close">Готово</button>`);
+        refresh();
+      },
+    });
+  },
+
+  today: () => {
+    const d = L.today(), groups = {};
+    d.rows.forEach(r => (groups[r.cow] = groups[r.cow] || []).push(r));
+    openSheet(`📅 Сегодня, ${dDate(d.date)}`, d.rows.length ? Object.entries(groups).map(([cow, rows]) =>
+      `<h2>🐄 ${esc(cow)}</h2><div class="card">${rows.map(r => `<div class="row"><div class="grow"><div class="t">${esc(r.category)}</div><div class="s">${dTime(r.created_at)}${r.note ? " · " + esc(r.note) : ""}</div></div><div class="amt">${fmt(r.amount)}</div></div>`).join("")}</div>`).join("")
+      + `<div class="card"><div class="kv"><span><b>Итого за сегодня</b></span><b>${money(d.total)}</b></div></div>`
+      : `<div class="card empty"><div class="e">📅</div>Сегодня расходов нет</div>`);
+  },
+
+  month: m => {
+    const month = m || S.month || todayStr().slice(0, 7);
+    S.month = month;
+    const d = L.month(month);
+    const [y, mm] = month.split("-").map(Number);
+    const shift = k => { const dt = new Date(y, mm - 1 + k, 1); return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}`; };
+    const label = new Date(y, mm - 1, 1).toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
+    kindSheet("month", "📆 Отчёт за месяц", `<div class="month-nav"><button data-act="month" data-id="${shift(-1)}">‹</button><b>${label}</b><button data-act="month" data-id="${shift(1)}">›</button></div>
+      ${d.cows.length ? d.cows.map(c => `<h2>🐄 ${esc(c.name)}</h2><div class="card">${c.categories.map(x => `<div class="kv"><span>${esc(x.category)}</span><b>${fmt(x.amount)}</b></div>`).join("")}
+        <div class="kv"><span><b>Итого</b></span><b>${money(c.total)}</b></div></div>`).join("")
+        + `<div class="card total"><div class="kv" style="border:0"><span>Всего за месяц</span><b>${fmt(d.total)} ${cur()}</b></div></div>`
+        : `<div class="card empty"><div class="e">📆</div>В этом месяце расходов нет</div>`}`);
+  },
+
+  alltime: () => {
+    const cows = L.cows("active"), total = cows.reduce((a, c) => a + c.total_cost, 0);
+    openSheet("📋 За всё время", cows.length ? cows.map(c => `
+      <h2>🐄 ${esc(c.name)}</h2><div class="card">
+        <div class="kv"><span>Куплена</span><b>${dDate(c.buy_date)} (${c.days} дн.)</b></div>
+        <div class="kv"><span>Цена покупки</span><b>${fmt(c.buy_price)}${c.buy_weight ? `, ${fmt(c.buy_weight)} кг` : ""}</b></div>
+        ${c.categories.map(x => `<div class="kv"><span>&nbsp;&nbsp;${esc(x.category)}</span><b>${fmt(x.amount)}</b></div>`).join("")}
+        <div class="kv"><span>Корм и уход</span><b>${fmt(c.expenses)}</b></div>
+        <div class="kv"><span><b>Итого вложено</b></span><b>${money(c.total_cost)}</b></div></div>`).join("")
+      + `<div class="card total"><div class="kv" style="border:0"><span>Всего во всех коров</span><b>${fmt(total)} ${cur()}</b></div></div>`
+      : `<div class="card empty">Активных коров нет</div>`);
+  },
+
+  products: () => {
+    kindSheet("products", "🗂 Корма и товары", `<div class="card">${DB.products.map(p => `<div class="row"><div class="grow"><div class="t">${esc(p.name)}</div><div class="s">${esc(p.unit)}</div></div>
+      <button class="chip" data-act="product-del" data-id="${p.id}" style="color:var(--red)">Удалить</button></div>`).join("") || `<div class="empty">Список пуст</div>`}</div>
+      <button class="btn" data-act="product-add">+ Добавить корм или товар</button>
+      <p class="hint">Они появляются как категории при записи расхода и при покупке корма на склад. Постоянные категории (вода, лекарства, ветеринар и др.) есть всегда.</p>`);
+  },
+  "product-add": () => formSheet({
+    title: "➕ Новый корм / товар",
+    fields: [
+      { name: "name", label: "Наименование", placeholder: "Ячмень, Силос, Солома" },
+      { type: "chips", name: "unit", label: "Единица измерения", value: "кг", options: UNITS.map(u => ({ value: u, label: u })) },
+    ],
+    submit: "Добавить",
+    onSubmit: v => { L.addProduct(v); closeSheet(); toast(`✅ «${v.name}» добавлен`); ACTIONS.products(); },
+  }),
+  "product-del": async (id, el) => {
+    const name = el.closest(".row").querySelector(".t").textContent;
+    if (!await ask(`Удалить «${esc(name)}» из списка? Уже записанные расходы останутся.`)) return;
+    L.deleteProduct(Number(id)); ACTIONS.products();
+  },
+
+  currency: () => {
+    kindSheet("cur", "💱 Валюта", `<div class="chips">${CURRENCIES.map(c => `<button class="chip ${c === DB.settings.currency ? "on" : ""}" data-act="currency-set" data-id="${esc(c)}">${esc(c)}</button>`).join("")}</div>
+      <p class="hint" style="margin-top:12px">Меняется только подпись. Суммы не пересчитываются.</p>`);
+  },
+  "currency-set": c => { DB.settings.currency = c; saveDB(); closeSheet(); refresh(); toast(`Валюта: ${c}`); },
+
+  backup: () => {
+    const photos = {};
+    DB.photos.forEach(p => { const b = readPhotoB64(p.url); if (b) photos[p.id] = b; });
+    const data = JSON.stringify({ app: "ferma-uchet", version: 1, exported_at: nowIso(), db: DB, photos });
+    const name = `ferma-kopiya-${todayStr()}.json`;
+    if (HAS_NATIVE) Android.exportBackup(name, data);
+    else { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([data], { type: "application/json" })); a.download = name; a.click(); }
+  },
+  restore: async () => {
+    if (!await ask("Восстановить данные из файла? Текущие данные в приложении будут заменены.", "Выбрать файл", false)) return;
+    if (HAS_NATIVE) Android.importBackup();
+    else { const i = document.createElement("input"); i.type = "file"; i.accept = ".json,application/json"; i.onchange = async () => window.onBackupFile(await i.files[0].text()); i.click(); }
+  },
+  wipe: async () => {
+    if (!await ask("Удалить <b>все</b> коровы, расходы, склад и фото? Сначала лучше сохранить копию.")) return;
+    if (!await ask("Точно удалить всё? Вернуть данные будет нельзя.", "Да, удалить всё")) return;
+    DB.photos.forEach(p => deletePhotoFile(p.url));
+    const currency = DB.settings.currency;
+    DB = defaultDB(); DB.settings.currency = currency; saveDB();
+    closeAllSheets(); switchTab("home"); toast("Все данные удалены");
+  },
+};
+
+// вызывается из Android после выбора файла копии
+window.onBackupFile = function (text) {
+  let data;
+  try { data = JSON.parse(text); } catch (e) { return toast("Это не файл копии Фермы", true); }
+  if (!data || data.app !== "ferma-uchet" || !data.db || !Array.isArray(data.db.cows)) return toast("Это не файл копии Фермы", true);
+  DB.photos.forEach(p => deletePhotoFile(p.url));
+  const db = data.db;
+  db.photos = (db.photos || []).map(p => {
+    const b = data.photos && data.photos[p.id];
+    return b ? { ...p, url: savePhotoFile(b) } : null;
+  }).filter(p => p && p.url);
+  DB = db; loadDefaultsInto(DB); saveDB();
+  closeAllSheets(); switchTab("home");
+  toast(`✅ Восстановлено: коров — ${DB.cows.length}, записей — ${DB.expenses.length}`);
+};
+window.onBackupSaved = ok => toast(ok ? "✅ Копия сохранена" : "Копия не сохранена", !ok);
+function loadDefaultsInto(db) { const d = defaultDB(); for (const k of Object.keys(d)) if (db[k] === undefined) db[k] = d[k]; }
+
+function shrinkImage(file, max = 1280) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src);
+      resolve(c.toDataURL("image/jpeg", 0.82).split(",")[1]);
+    };
+    img.onerror = () => reject(new Error("Не удалось открыть фото"));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+// ───────── запуск ─────────
+loadDB();
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+$("#refresh").onclick = () => { refresh(); };
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !S.sheets.length) refresh(); });
+switchTab("home");
+</script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Номер версии растёт с каждой сборкой на GitHub — Google Play требует новый versionCode при каждой загрузке.
+def buildNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
+
+android {
+    namespace 'tj.ferma.uchet'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'tj.ferma.uchet'
+        minSdk 26
+        targetSdk 36
+        versionCode buildNumber
+        versionName "1.0.${buildNumber}"
+    }
+
+    signingConfigs {
+        upload {
+            storeFile file('upload.jks')
+            storePassword 'FermaUchet2026'
+            keyAlias 'upload'
+            keyPassword 'FermaUchet2026'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.upload
+        }
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
