@@ -100,7 +100,7 @@ textarea.inp{min-height:70px;resize:vertical}
 .list-btn::after{content:"›";color:var(--muted);font-size:22px}
 
 /* ── всплывающие окна ── */
-.sheet-wrap{position:fixed;inset:0;z-index:20;background:rgba(20,28,22,.45);display:flex;align-items:flex-end;animation:fade .18s}
+.sheet-wrap{position:fixed;top:0;left:0;right:0;bottom:0;z-index:20;background:rgba(20,28,22,.45);display:flex;align-items:flex-end;animation:fade .18s}
 .sheet{background:var(--bg);width:100%;max-height:94vh;border-radius:22px 22px 0 0;display:flex;flex-direction:column;animation:up .22s cubic-bezier(.2,.8,.3,1)}
 .sheet-head{display:flex;align-items:center;padding:14px 16px 8px;gap:8px}
 .sheet-head h3{flex:1;margin:0;font-size:18px}
@@ -117,8 +117,8 @@ textarea.inp{min-height:70px;resize:vertical}
 @keyframes sp{to{transform:rotate(360deg)}}
 
 .photos{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-.photos img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;background:var(--green-soft)}
-.viewer{position:fixed;inset:0;z-index:50;background:#000;display:grid;place-items:center}
+.photos img{width:100%;height:28vw;max-height:200px;object-fit:cover;border-radius:10px;background:var(--green-soft)}
+.viewer{position:fixed;top:0;left:0;right:0;bottom:0;z-index:50;background:#000;display:grid;place-items:center}
 .viewer img{max-width:100%;max-height:100%}
 
 .result{text-align:center;padding:8px 0 4px}
@@ -241,9 +241,9 @@ const L = {
       const categories = Object.entries(catMap).map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount);
       const expenses = exps.reduce((a, e) => a + e.amount, 0);
       const total_cost = c.buy_price + expenses;
-      const item = { ...c, expenses, total_cost, categories,
+      const item = Object.assign({}, c, { expenses, total_cost, categories,
         history: exps.slice().sort((a, b) => b.created_at.localeCompare(a.created_at)),
-        photos: DB.photos.filter(p => p.cow_id === c.id).sort((a, b) => a.added_at.localeCompare(b.added_at)) };
+        photos: DB.photos.filter(p => p.cow_id === c.id).sort((a, b) => a.added_at.localeCompare(b.added_at)) });
       if (status === "active") item.days = daysBetween(c.buy_date, todayStr());
       else { item.profit = (c.sell_price || 0) - total_cost; item.days = daysBetween(c.buy_date, c.sell_date || todayStr()); }
       return item;
@@ -304,7 +304,7 @@ const L = {
   today() {
     const t = todayStr();
     const rows = DB.expenses.filter(e => e.created_at.slice(0, 10) === t).sort((a, b) => b.created_at.localeCompare(a.created_at))
-      .map(e => ({ ...e, cow: L.cowName(e.cow_id) }));
+      .map(e => Object.assign({}, e, { cow: L.cowName(e.cow_id) }));
     return { date: t, rows, total: rows.reduce((a, r) => a + r.amount, 0) };
   },
   month(ym) {
@@ -322,8 +322,8 @@ const L = {
     return { month: ym, cows, total: cows.reduce((a, c) => a + c.total, 0) };
   },
   stock() {
-    return DB.stock.filter(s => s.kg_left > 1e-9).sort((a, b) => b.bought_date.localeCompare(a.bought_date)).map(s => ({
-      ...s, unit: s.unit || "кг", price_per_kg: s.price_total / s.kg_total, percent: Math.round(s.kg_left / s.kg_total * 100) }));
+    return DB.stock.filter(s => s.kg_left > 1e-9).sort((a, b) => b.bought_date.localeCompare(a.bought_date)).map(s => Object.assign({}, s, {
+      unit: s.unit || "кг", price_per_kg: s.price_total / s.kg_total, percent: Math.round(s.kg_left / s.kg_total * 100) }));
   },
   buyStock(v) {
     const name = String(v.name || "").trim();
@@ -375,7 +375,7 @@ function readPhotoB64(url) {
 // ═════════════════ ИНТЕРФЕЙС ═════════════════
 const S = { tab: "home", cowsTab: "active", month: null, sheets: [] };
 const $ = (s, el = document) => el.querySelector(s);
-const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = n => { const v = Number(n) || 0; return (Math.abs(v) < 100 && v % 1 ? Math.round(v * 100) / 100 : Math.round(v)).toLocaleString("ru-RU"); };
 const cur = () => esc(DB.settings.currency || "сомон");
 const money = n => `${fmt(n)} <small>${cur()}</small>`;
@@ -415,7 +415,7 @@ function refresh() {
 }
 function bindView(root) {
   root.querySelectorAll("[data-act]").forEach(el => {
-    el.onclick = e => { e.stopPropagation(); ACTIONS[el.dataset.act]?.(el.dataset.id, el); };
+    el.onclick = e => { e.stopPropagation(); const fn = ACTIONS[el.dataset.act]; if (fn) fn(el.dataset.id, el); };
   });
 }
 
@@ -615,20 +615,20 @@ function formSheet({ title, fields, submit, onSubmit, intro = "" }) {
   const body = intro + fields.map(f => {
     if (f.type === "chips") return `<label class="f"><span>${f.label}</span><div class="chips" data-name="${f.name}">${f.options.map(o =>
       `<button type="button" class="chip ${o.value === f.value ? "on" : ""}" data-v="${esc(o.value)}">${esc(o.label)}</button>`).join("")}</div>${f.hint ? `<div class="hint">${f.hint}</div>` : ""}</label>`;
-    const attrs = `class="inp" name="${f.name}" placeholder="${esc(f.placeholder || "")}" ${f.num ? 'inputmode="decimal"' : ""} ${f.type === "date" ? 'type="date"' : ""} value="${esc(f.value ?? "")}"`;
+    const attrs = `class="inp" name="${f.name}" placeholder="${esc(f.placeholder || "")}" ${f.num ? 'inputmode="decimal"' : ""} ${f.type === "date" ? 'type="date"' : ""} value="${esc(f.value == null ? "" : f.value)}"`;
     return `<label class="f"><span>${f.label}</span>${f.type === "textarea" ? `<textarea ${attrs}></textarea>` : `<input ${attrs}>`}${f.hint ? `<div class="hint" data-hint="${f.name}">${f.hint}</div>` : ""}</label>`;
   }).join("") + `<button class="btn" data-submit>${submit}</button>`;
   return openSheet(title, body, el => {
     el.querySelectorAll(".chips").forEach(box => box.querySelectorAll(".chip").forEach(ch => ch.onclick = () => {
       box.querySelectorAll(".chip").forEach(x => x.classList.remove("on")); ch.classList.add("on");
-      fields.find(x => x.name === box.dataset.name)?.onChange?.(ch.dataset.v, el);
+      const fd = fields.find(x => x.name === box.dataset.name); if (fd && fd.onChange) fd.onChange(ch.dataset.v, el);
     }));
     const first = el.querySelector("input.inp:not([type=date])"); if (first && !first.value && !el.querySelector(".chips")) setTimeout(() => first.focus(), 250);
     const btn = el.querySelector("[data-submit]");
     btn.onclick = async () => {
       const v = {};
       el.querySelectorAll("[name]").forEach(i => v[i.name] = i.value.trim());
-      el.querySelectorAll(".chips").forEach(b => v[b.dataset.name] = b.querySelector(".chip.on")?.dataset.v ?? "");
+      el.querySelectorAll(".chips").forEach(b => { const on = b.querySelector(".chip.on"); v[b.dataset.name] = on ? on.dataset.v : ""; });
       btn.disabled = true;
       try { await onSubmit(v, el); } catch (e) { toast(e.message, true); }
       btn.disabled = false;
@@ -937,7 +937,7 @@ window.onBackupFile = function (text) {
   const db = data.db;
   db.photos = (db.photos || []).map(p => {
     const b = data.photos && data.photos[p.id];
-    return b ? { ...p, url: savePhotoFile(b) } : null;
+    return b ? Object.assign({}, p, { url: savePhotoFile(b) }) : null;
   }).filter(p => p && p.url);
   DB = db; loadDefaultsInto(DB); saveDB();
   closeAllSheets(); switchTab("home");

@@ -101,6 +101,11 @@ public class MainActivity extends Activity {
                             | android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
         }
 
+        // Отладка WebView только в тестовой (debug) сборке — в версии для Google Play выключена
+        if ((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            WebView.setWebContentsDebuggingEnabled(true);
+        }
+
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
