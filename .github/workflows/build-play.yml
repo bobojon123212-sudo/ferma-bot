@@ -3,7 +3,7 @@ name: Собрать приложение для Google Play
 on:
   push:
     branches: [main, master]
-    paths: ["play-app/**", ".github/workflows/build-play.yml"]
+    paths: ["play-app/app/**", "play-app/*.gradle", ".github/workflows/build-play.yml"]
   workflow_dispatch:
 
 permissions:

@@ -12,11 +12,15 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        api: [26, 30, 36]
+        include:
+          - { api: 26, arch: x86 }
+          - { api: 28, arch: x86_64 }
+          - { api: 30, arch: x86_64 }
+          - { api: 36, arch: x86_64 }
     steps:
       - uses: actions/checkout@v4
 
@@ -51,13 +55,14 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api }}
-          arch: x86_64
+          arch: ${{ matrix.arch }}
           target: google_apis
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
             adb install -r play-app/app/build/outputs/apk/debug/app-debug.apk
-            node play-app/tests/android-test.mjs api${{ matrix.api }} || echo "FAIL" > play-app/tests/out/FAILED
+            mkdir -p play-app/tests/out
+            timeout 900 node play-app/tests/android-test.mjs api${{ matrix.api }} || echo "FAIL" > play-app/tests/out/FAILED
 
       - name: Опубликовать отчёт и скриншоты
         if: always()

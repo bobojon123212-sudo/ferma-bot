@@ -294,7 +294,7 @@ try {
   ok("Листание месяцев назад", m1 < m0, `${m0} → ${m1}`);
   ok("Только одно окно отчёта после листания", (await sheets()) === 1);
   await click('.sheet .month-nav button >> nth=1');
-  ok("Итог месяца = сумма всех расходов", await ev(() => near(L.month(S.month).total, DB.expenses.reduce((a, e) => a + e.amount, 0))));
+  ok("Итог месяца = сумма всех расходов", await ev(() => Math.abs(L.month(S.month).total - DB.expenses.reduce((a, e) => a + e.amount, 0)) < 0.01));
   await shot("11-month");
   await back();
   await click("[data-act=alltime]");
