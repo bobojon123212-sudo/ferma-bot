@@ -4,8 +4,9 @@ plugins {
 
 // Адрес сервера можно «зашить» в APK: переменная SERVER_URL при сборке
 // (в GitHub: Settings → Secrets and variables → Actions → Variables → SERVER_URL).
-// Если не задан — приложение спросит адрес при первом запуске.
+// Если не задан — используется https://ferma-bot.onrender.com.
 def serverUrl = (System.getenv("SERVER_URL") ?: "").trim()
+if (serverUrl.isEmpty()) serverUrl = "https://ferma-bot.onrender.com"
 def buildNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
 
 android {
