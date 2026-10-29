@@ -16,7 +16,7 @@ X=$(dump)
 B=$(echo "$X" | grep -o 'class="android.widget.EditText"[^>]*bounds="\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]"' | head -1 | grep -o 'bounds="[^"]*"')
 if [ -z "$B" ]; then
   # на главном экране офлайн-приложения поля нет — открываем «Добавить корову»
-  BTN=$(echo "$X" | grep -oE 'text="[^"]*(Добавить первую корову|Войти по Telegram ID)[^"]*"[^>]*bounds="[^"]*"' | grep -o 'bounds="[^"]*"' | head -1)
+  BTN=$(echo "$X" | grep -oE '(text|content-desc)="[^"]*(Добавить первую корову|Войти по Telegram ID)[^"]*"[^>]*bounds="[^"]*"' | grep -o 'bounds="[^"]*"' | head -1)
   if [ -n "$BTN" ]; then
     N=($(echo $BTN | grep -o '[0-9]\+')); adb shell input tap $(( (N[0]+N[2])/2 )) $(( (N[1]+N[3])/2 )); sleep 3
     X=$(dump)

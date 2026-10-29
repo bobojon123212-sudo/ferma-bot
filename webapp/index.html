@@ -290,7 +290,7 @@ function showLogin(step = 0, uid = "") {
   if ($("#tapback")) $("#tapback").onclick = () => showLogin(0);
   if (step === 1) {
     const inp = $("#uid"); inp.focus();
-    inp.onkeydown = e => e.key === "Enter" && go.click();
+    inp.onkeydown = e => { if (e.key === "Enter") go.click(); };   // не возвращаем false — иначе браузер блокирует ввод
     go.onclick = async () => {
       const v = inp.value.trim();
       if (!/^\d{4,15}$/.test(v)) return toast("Введите ID — только цифры", true);
@@ -300,7 +300,7 @@ function showLogin(step = 0, uid = "") {
     };
   } else {
     const inp = $("#code"); inp.focus();
-    inp.oninput = () => inp.value.length === 4 && go.click();
+    inp.oninput = () => { if (inp.value.replace(/\D/g, "").length === 4) go.click(); };
     $("#back").onclick = () => showLogin(1, uid);
     go.onclick = async () => {
       go.disabled = true;
