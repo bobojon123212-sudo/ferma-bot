@@ -6,6 +6,9 @@ on:
     paths: ["android/**", ".github/workflows/**"]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -34,3 +37,12 @@ jobs:
         with:
           name: Ferma-APK
           path: Ferma.apk
+
+      - name: Опубликовать в Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Ферма ${{ github.run_number }}
+          body: "Скачать: Ferma.apk ниже. Постоянная ссылка на последнюю версию — https://github.com/${{ github.repository }}/releases/latest/download/Ferma.apk"
+          files: Ferma.apk
+          make_latest: true
