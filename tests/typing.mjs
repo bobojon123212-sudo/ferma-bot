@@ -39,12 +39,19 @@ try {
     await typeInto(".sheet [name=price]", "6500", "Цена коровы");
     await typeInto(".sheet [name=weight]", "280", "Вес");
     await dev.screenshot({ path: `${OUT}${L}-typed.png` });
-    await page.fill(".sheet [name=name]", "Test"); await page.click(".sheet [data-submit]"); await sleep(800);
+    await sh("input keyevent 111"); await sleep(800);   // спрятать клавиатуру (Esc)
+    await page.fill(".sheet [name=name]", "Test"); await page.click(".sheet [data-submit]"); await sleep(1500);
+    ok("После сохранения коровы приложение работает", await page.evaluate(() => DB.cows.length === 1 && S.sheets.length === 1));
     await page.click(".sheet [data-act=expense]"); await sleep(800);
     await page.click('.sheet .chip[data-v="💊 Лекарства"]');
     await typeInto(".sheet [name=amount]", "150", "Сумма расхода");
   }
-} catch (e) { ok("тест прерван", false, e.message.split("\n")[0]); }
+} catch (e) {
+  ok("тест прерван", false, e.message.split("\n")[0]);
+  const lc = await sh(`logcat -d -t 400 | grep -E 'AndroidRuntime|FATAL|ActivityTaskManager|ActivityManager.*${PKG}|chromium.*(crash|Crash)|${PKG}' | tail -60`);
+  fs.writeFileSync(`${OUT}${L}-logcat.txt`, lc);
+  await dev.screenshot({ path: `${OUT}${L}-crash.png` }).catch(() => {});
+}
 fs.appendFileSync(`${OUT}keyboard-report.txt`, rep.join("\n") + "\n");
 console.log(rep.join("\n"));
 await dev.close();
